@@ -9,4 +9,9 @@ wheels/
 # Virtual environments
 .venv
 node_modules
-# Turborepo.turbo/
+
+# Turborepo
+.turbo/
+
+# Build artifacts
+*.tsbuildinfo
