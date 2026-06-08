@@ -36,12 +36,19 @@ graph TB
 
 ```
 GrabPic/
-├── backend/          # Python API + ML processing
-│   ├── main.py
-│   ├── ML/           # Modal.com serverless functions
-│   └── pyproject.toml
-├── frontend/         # Next.js app
-├── docs/             # PRD and documentation
+├── apps/
+│   ├── web/          # Next.js 14 (App Router) — Organizer dashboard + attendee portal
+│   └── api/          # Cloudflare Workers + Hono.js — Edge API layer
+├── packages/
+│   ├── db/           # Turso (libSQL) client, schema, migrations
+│   ├── types/        # Shared TypeScript types across apps
+│   └── config/       # Shared tsconfig, eslint configs
+├── ml/
+│   ├── processor.py  # Modal.com GPU serverless functions
+│   └── requirements.txt
+├── tests/            # Integration tests against real infrastructure
+├── docs/             # Engineering docs (API contracts, schema, deploy checklist)
+├── .env.example      # All required environment variables
 └── AGENTS.md         # AI agent guidelines
 ```
 
@@ -49,13 +56,14 @@ GrabPic/
 
 | Layer | Choice |
 |-------|--------|
-| Frontend | Next.js 14 (App Router) + TypeScript |
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind |
 | Backend API | Cloudflare Workers + Hono.js |
 | Database | Turso (libSQL with vector search) |
 | Storage | Cloudflare R2 |
 | ML Processing | Modal.com (GPU serverless) |
 | Face Recognition | FaceNet / ArcFace (512-dim embeddings) |
 | Clustering | DBSCAN |
+| Monorepo | pnpm workspaces + Turborepo |
 
 ## Workflows
 
@@ -92,17 +100,55 @@ sequenceDiagram
 ## Getting Started
 
 ```bash
-# Install dependencies
+# 1. Install dependencies
 pnpm install
-pip install modal
+pip install -r ml/requirements.txt
 
-# Set up databases
-turso db create grabpic-dev
-turso db show grabpic-dev
+# 2. Copy env template and fill in your secrets
+cp .env.example .env
+# Edit .env with your Turso, R2, Cloudflare, and Modal credentials
 
-# Run API
-cd backend && python main.py
+# 3. Run database migrations
+pnpm --filter @grabpic/db migrate
 
-# Run frontend
-cd frontend && pnpm dev
+# 4. Start API (local dev with Wrangler)
+cd apps/api && pnpm dev
+
+# 5. Start frontend (another terminal)
+cd apps/web && pnpm dev
 ```
+
+## Testing
+
+Tests require real infrastructure (Turso DB, Cloudflare API, etc.). Configure `.env` first, then:
+
+```bash
+pnpm vitest run
+```
+
+Tests gracefully skip when env vars are missing, so they always pass on CI without secrets. Contract tests (type validation) run regardless.
+
+## Lint
+
+```bash
+pnpm lint
+```
+
+## Docs
+
+Remaining engineering docs in `docs/modularized_prd/`:
+
+| Doc | What it covers |
+|-----|---------------|
+| `api_endpoints_contracts.md` | All API route contracts with request/response shapes |
+| `database_schema_deep_dive.md` | Turso schema (events, photos, faces, embeddings) |
+| `deployment_checklist.md` | Production deployment steps |
+| `development_environment_setup.md` | Dev environment setup |
+| `processing_pipeline_details.md` | Modal ML processing pipeline |
+| `privacy_compliance.md` | GDPR/BIPA privacy requirements |
+| `technical_architecture.md` | System architecture and data flow |
+| `open_questions.md` | Resolved design decisions |
+
+## License
+
+MIT
