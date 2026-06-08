@@ -140,15 +140,16 @@ Remaining engineering docs in `docs/modularized_prd/`:
 
 | Doc | What it covers |
 |-----|---------------|
-| `api_endpoints_contracts.md` | All API route contracts with request/response shapes |
-| `database_schema_deep_dive.md` | Turso schema (events, photos, faces, embeddings) |
-| `deployment_checklist.md` | Production deployment steps |
-| `development_environment_setup.md` | Dev environment setup |
-| `processing_pipeline_details.md` | Modal ML processing pipeline |
-| `privacy_compliance.md` | GDPR/BIPA privacy requirements |
-| `technical_architecture.md` | System architecture and data flow |
-| `open_questions.md` | Resolved design decisions |
+| [`api_endpoints_contracts.md`](docs/modularized_prd/api_endpoints_contracts.md) | All API route contracts with request/response shapes |
+| [`database_schema_deep_dive.md`](docs/modularized_prd/database_schema_deep_dive.md) | Turso schema (events, photos, faces, embeddings) |
+| [`deployment_checklist.md`](docs/modularized_prd/deployment_checklist.md) | Production deployment steps |
+| [`development_environment_setup.md`](docs/modularized_prd/development_environment_setup.md) | Dev environment setup |
+| [`processing_pipeline_details.md`](docs/modularized_prd/processing_pipeline_details.md) | Modal ML processing pipeline |
+| [`privacy_compliance.md`](docs/modularized_prd/privacy_compliance.md) | GDPR/BIPA privacy requirements |
+| [`technical_architecture.md`](docs/modularized_prd/technical_architecture.md) | System architecture and data flow |
+| [`open_questions.md`](docs/modularized_prd/open_questions.md) | Resolved design decisions |
+| [`todo.md`](docs/todo.md) | Full project todo list with completion status |
 
 ## License
 
-MIT
+[MIT](LICENSE)
