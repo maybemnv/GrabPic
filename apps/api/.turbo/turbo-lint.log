@@ -1,9 +1,0 @@
-
-> @grabpic/api@0.1.0 lint D:\Projects\GrabPic\apps\api
-> tsc --noEmit
-
-src/routes/match.ts(8,11): error TS2339: Property 'eventId' does not exist on type '{}'.
-src/routes/upload.ts(17,11): error TS2339: Property 'eventId' does not exist on type '{}'.
-src/routes/upload.ts(39,44): error TS2339: Property 'createSignedUrl' does not exist on type 'R2Bucket'.
-src/routes/upload.ts(52,11): error TS2339: Property 'eventId' does not exist on type '{}'.
- ELIFECYCLE  Command failed with exit code 2.
