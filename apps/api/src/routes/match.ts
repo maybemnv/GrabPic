@@ -12,7 +12,11 @@ app.post('/', async (c) => {
   const startTime = Date.now()
 
   try {
-    const { passcode, selfieData, threshold = 0.6 } = await c.req.json() as {
+    const {
+      passcode,
+      selfieData,
+      threshold = 0.6,
+    } = (await c.req.json()) as {
       passcode: string
       selfieData: string
       threshold?: number
@@ -55,15 +59,17 @@ app.post('/', async (c) => {
       args: [eventId],
     })
 
-    const matches = photos.rows.map((photo: any, i: number) => ({
-      photoId: photo.id as string,
-      similarity: Math.max(0.6, 0.9 - i * 0.02),
-      url: photo.r2_key ? `/api/photos/${photo.id}` : '',
-      thumbnailUrl: photo.thumbnail_800_key ? `/api/thumbs/${photo.id}` : '',
-      width: Number(photo.width) || 0,
-      height: Number(photo.height) || 0,
-      faces: [{ bbox: { x: 0, y: 0, width: 100, height: 100 }, isMatch: true }],
-    })).filter((m: any) => m.similarity >= (threshold as number))
+    const matches = photos.rows
+      .map((photo: any, i: number) => ({
+        photoId: photo.id as string,
+        similarity: Math.max(0.6, 0.9 - i * 0.02),
+        url: photo.r2_key ? `/api/photos/${photo.id}` : '',
+        thumbnailUrl: photo.thumbnail_800_key ? `/api/thumbs/${photo.id}` : '',
+        width: Number(photo.width) || 0,
+        height: Number(photo.height) || 0,
+        faces: [{ bbox: { x: 0, y: 0, width: 100, height: 100 }, isMatch: true }],
+      }))
+      .filter((m: any) => m.similarity >= (threshold as number))
 
     return c.json({
       matches,

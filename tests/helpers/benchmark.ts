@@ -24,7 +24,14 @@ export function measureLatency(fn: () => Promise<void>, samples = 10): Promise<n
   })()
 }
 
-export function computePercentiles(durations: number[]): { p50: number; p95: number; p99: number; min: number; max: number; mean: number } {
+export function computePercentiles(durations: number[]): {
+  p50: number
+  p95: number
+  p99: number
+  min: number
+  max: number
+  mean: number
+} {
   const sorted = [...durations].sort((a, b) => a - b)
   const len = sorted.length
 

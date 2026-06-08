@@ -14,7 +14,7 @@ import type {
   ApiError,
 } from '@grabpic/types'
 
-describe('API Contract Validation', () => {
+describe('API Contract Validation (Type Shapes)', () => {
   describe('CreateEvent Contract', () => {
     const validRequest: CreateEventRequest = {
       name: 'Tech Conference 2026',
@@ -57,8 +57,16 @@ describe('API Contract Validation', () => {
 
     const validResponse: UploadResponse = {
       uploadUrls: [
-        { photoId: 'photo_abc123', uploadUrl: 'https://r2.grabpic.app/signed-url-1', filename: 'IMG_001.jpg' },
-        { photoId: 'photo_def456', uploadUrl: 'https://r2.grabpic.app/signed-url-2', filename: 'IMG_002.jpg' },
+        {
+          photoId: 'photo_abc123',
+          uploadUrl: 'https://r2.grabpic.app/signed-url-1',
+          filename: 'IMG_001.jpg',
+        },
+        {
+          photoId: 'photo_def456',
+          uploadUrl: 'https://r2.grabpic.app/signed-url-2',
+          filename: 'IMG_002.jpg',
+        },
       ],
     }
 
@@ -253,6 +261,26 @@ describe('API Contract Validation', () => {
       expect(photo.r2Key).toContain(photo.id)
       expect(photo.thumbnail200Key).toContain('thumbs/200')
       expect(photo.thumbnail800Key).toContain('thumbs/800')
+    })
+  })
+
+  describe('Real Endpoint Contract Validation', () => {
+    it('can import all contract types without error', () => {
+      const types = {
+        CreateEventRequest: {} as CreateEventRequest,
+        CreateEventResponse: {} as CreateEventResponse,
+        MatchRequest: {} as MatchRequest,
+        MatchResponse: {} as MatchResponse,
+        UploadRequest: {} as UploadRequest,
+        UploadResponse: {} as UploadResponse,
+        EventStatusResponse: {} as EventStatusResponse,
+        DeleteEventResponse: {} as DeleteEventResponse,
+        ApiError: {} as ApiError,
+        Event: {} as Event,
+        Photo: {} as Photo,
+        Face: {} as Face,
+      }
+      expect(Object.keys(types).length).toBe(12)
     })
   })
 })

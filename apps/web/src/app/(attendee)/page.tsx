@@ -112,7 +112,11 @@ export default function AttendeePage() {
             </>
           ) : (
             <>
-              <img src={selfie} alt="Selfie" className="w-48 h-48 object-cover rounded-full mx-auto" />
+              <img
+                src={selfie}
+                alt="Selfie"
+                className="w-48 h-48 object-cover rounded-full mx-auto"
+              />
               <button
                 onClick={handleMatch}
                 disabled={loading}
@@ -128,12 +132,13 @@ export default function AttendeePage() {
 
       {step === 'gallery' && (
         <div className="space-y-4">
-          <p className="text-lg font-semibold">
-            Found {matches.length} photos of you
-          </p>
+          <p className="text-lg font-semibold">Found {matches.length} photos of you</p>
           <div className="grid grid-cols-2 gap-4">
             {matches.map((photo) => (
-              <div key={photo.photoId as string} className="bg-white border rounded-lg overflow-hidden">
+              <div
+                key={photo.photoId as string}
+                className="bg-white border rounded-lg overflow-hidden"
+              >
                 <div className="aspect-square bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
                   Photo
                 </div>

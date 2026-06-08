@@ -108,7 +108,8 @@ export default function OrganizerPage() {
           <div className="bg-white border rounded-lg p-6">
             <h2 className="font-semibold mb-2">{eventName}</h2>
             <p className="text-sm text-gray-500">
-              Passcode: <span className="font-mono font-bold text-black">{event.passcode as string}</span>
+              Passcode:{' '}
+              <span className="font-mono font-bold text-black">{event.passcode as string}</span>
             </p>
             <p className="text-sm text-gray-500">
               Share: <span className="text-blue-600">{event.shareUrl as string}</span>

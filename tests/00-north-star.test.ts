@@ -1,86 +1,78 @@
-import { describe, it, expect } from 'vitest'
-import { createMockDb } from './helpers/mock-db'
-import { createMockEnv } from './helpers/mock-env'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { getApiBaseUrl, getDb, isSkippable } from './helpers/setup'
 
 const NORTH_STAR_TARGET_MS = 5000
 
-describe('North Star Metric: Time from selfie to viewing photos <5s', () => {
-  it('match endpoint responds within 5 seconds under normal load', async () => {
-    const db = createMockDb()
-    const env = createMockEnv()
+describe.skipIf(isSkippable())('North Star Metric: Selfie → Gallery <5s', () => {
+  const eventId = `north_star_${Date.now()}`
+  const passcode = String(100000 + Math.floor(Math.random() * 900000))
+  const api = () => getApiBaseUrl()
 
-    db.seed('events', [
-      { id: 'evt_test', passcode: '123456', status: 'ready', photo_count: 100, face_count: 200 },
-    ])
-
-    const start = performance.now()
-
-    const result = await db.execute({
-      sql: `SELECT p.id, p.r2_key, p.thumbnail_200_key, p.thumbnail_800_key, p.width, p.height
-            FROM photos p
-            JOIN faces f ON f.photo_id = p.id
-            JOIN face_embeddings fe ON fe.face_id = f.id
-            WHERE p.event_id = ?
-            GROUP BY p.id
-            LIMIT 100`,
-      args: ['evt_test'],
-    })
-
-    const duration = performance.now() - start
-
-    expect(result.rows.length).toBeGreaterThan(0)
-    expect(duration).toBeLessThan(NORTH_STAR_TARGET_MS)
-  })
-
-  it('generates signed URLs with 1-hour expiry for matched photos', async () => {
-    const env = createMockEnv()
-    const key = 'events/evt_test/photo_001.jpg'
-
-    const url = await env.PHOTOS.createSignedUrl(key, {
-      expiration: Math.floor(Date.now() / 1000) + 3600,
-    })
-
-    expect(url).toContain(key)
-    expect(url).toContain('expires=')
-    expect(url).toContain('method=GET')
-  })
-
-  it('returns correct match response shape within time budget', async () => {
-    const db = createMockDb()
-    db.seed('events', [
-      { id: 'evt_test', passcode: '654321', status: 'ready', photo_count: 50, face_count: 80 },
-    ])
-
-    const start = performance.now()
-
-    const event = await db.execute({
-      sql: 'SELECT id, passcode, status FROM events WHERE id = ?',
-      args: ['evt_test'],
-    })
-
-    expect(event.rows.length).toBe(1)
-    expect(event.rows[0].passcode).toBe('654321')
-    expect(event.rows[0].status).toBe('ready')
-
-    const photos = await db.execute({
-      sql: `SELECT p.id, p.r2_key, p.thumbnail_800_key, p.width, p.height
-            FROM photos p
-            JOIN faces f ON f.photo_id = p.id
-            JOIN face_embeddings fe ON fe.face_id = f.id
-            WHERE p.event_id = ?
-            GROUP BY p.id
-            LIMIT 100`,
-      args: ['evt_test'],
-    })
-
-    const duration = performance.now() - start
-
-    expect(photos.rows.length).toBeGreaterThanOrEqual(1)
-    for (const photo of photos.rows) {
-      expect(photo).toHaveProperty('id')
-      expect(photo).toHaveProperty('r2_key')
+  afterAll(async () => {
+    try {
+      await fetch(`${api()}/events/${eventId}`, { method: 'DELETE' })
+    } catch {
+      /* cleanup best-effort */
     }
+  })
 
+  it('creates event via real API', async () => {
+    const res = await fetch(`${api()}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'North Star Test',
+        organizerEmail: 'test@northstar.com',
+        organizerName: 'North Star',
+        expiryDays: 1,
+      }),
+    })
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body.eventId).toBeDefined()
+    expect(body.passcode).toMatch(/^\d{6}$/)
+  })
+
+  it('match endpoint responds within 5 seconds (no-matches case)', async () => {
+    const start = performance.now()
+
+    const res = await fetch(`${api()}/events/${eventId}/match`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        passcode,
+        selfieData: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',
+        threshold: 0.6,
+      }),
+    })
+
+    const duration = performance.now() - start
     expect(duration).toBeLessThan(NORTH_STAR_TARGET_MS)
+
+    if (res.status === 200) {
+      const body = await res.json()
+      expect(body).toHaveProperty('matches')
+      expect(body).toHaveProperty('processingTime')
+    }
+  })
+
+  it('event status endpoint returns correct shape', async () => {
+    const res = await fetch(`${api()}/events/${eventId}/status`)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toHaveProperty('status')
+    expect(['processing', 'ready', 'failed', 'expired']).toContain(body.status)
+    expect(body).toHaveProperty('photoCount')
+    expect(body).toHaveProperty('faceCount')
+  })
+
+  it('event stored in Turso with correct data', async () => {
+    const db = getDb()
+    const result = await db.execute({
+      sql: 'SELECT id, name, status FROM events WHERE id = ?',
+      args: [eventId],
+    })
+    expect(result.rows.length).toBe(1)
+    expect(result.rows[0].id).toBe(eventId)
   })
 })

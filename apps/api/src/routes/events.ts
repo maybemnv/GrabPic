@@ -48,14 +48,17 @@ app.post('/', async (c) => {
       args: [eventId, name, passcode, now, now + expiryDays * 86400, organizerEmail, organizerName],
     })
 
-    return c.json({
-      eventId,
-      passcode,
-      uploadUrl: `/events/${eventId}/upload`,
-      shareUrl: `https://grabpic.app/e/${passcode}`,
-      qrCode: `https://api.grabpic.app/qr/${eventId}`,
-      expiresAt: now + expiryDays * 86400,
-    }, 201)
+    return c.json(
+      {
+        eventId,
+        passcode,
+        uploadUrl: `/events/${eventId}/upload`,
+        shareUrl: `https://grabpic.app/e/${passcode}`,
+        qrCode: `https://api.grabpic.app/qr/${eventId}`,
+        expiresAt: now + expiryDays * 86400,
+      },
+      201,
+    )
   } catch (err) {
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
