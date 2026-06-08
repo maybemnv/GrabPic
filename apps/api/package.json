@@ -1,0 +1,23 @@
+{
+  "name": "@grabpic/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy src/index.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grabpic/db": "workspace:*",
+    "@grabpic/types": "workspace:*",
+    "@libsql/client": "^0.14.0",
+    "hono": "^4.0.0",
+    "@hono/zod-validator": "^0.2.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.0.0"
+  }
+}

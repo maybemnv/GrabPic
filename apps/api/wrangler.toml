@@ -1,0 +1,20 @@
+name = "grabpic-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "grabpic-photos"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "grabpic"
+database_id = ""
+
+[vars]
+LOG_LEVEL = "info"
+MODAL_TOKEN = ""
+MODAL_WEBHOOK_URL = ""
+
+[env.dev]
+vars = { LOG_LEVEL = "debug" }
