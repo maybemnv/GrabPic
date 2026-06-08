@@ -1,4 +1,4 @@
-# FaceFind - Monetization Strategy (Post-MVP)
+# GrabPic - Monetization Strategy (Post-MVP)
 
 **Version:** 1.0
 **Date:** February 9, 2026

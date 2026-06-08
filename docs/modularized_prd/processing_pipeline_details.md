@@ -1,4 +1,4 @@
-# FaceFind - Processing Pipeline Details
+# GrabPic - Processing Pipeline Details
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 
 stub = modal.Stub(
-    "facefind-processor",
+    "GrabPic-processor",
     secrets=[modal.Secret.from_name("turso-credentials")]
 )
 
@@ -175,11 +175,11 @@ export async function onUploadComplete(req: Request) {
 
   // Get photo URLs from R2
   const photoUrls = photoIds.map(id =>
-    `https://r2.facefind.app/events/${eventId}/${id}.jpg`
+    `https://r2.GrabPic.app/events/${eventId}/${id}.jpg`
   )
 
   // Trigger Modal function
-  const modalUrl = "https://modal.com/facefind-processor/process-event"
+  const modalUrl = "https://modal.com/GrabPic-processor/process-event"
   const response = await fetch(modalUrl, {
     method: 'POST',
     headers: {

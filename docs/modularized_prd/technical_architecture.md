@@ -1,4 +1,4 @@
-# FaceFind - Technical Architecture
+# GrabPic - Technical Architecture
 
 **Version:** 1.0
 **Date:** February 9, 2026

@@ -1,4 +1,4 @@
-# FaceFind - Self-Oriented Goals (Resume + Learning)
+# GrabPic - Self-Oriented Goals (Resume + Learning)
 
 **Version:** 1.0
 **Date:** February 9, 2026

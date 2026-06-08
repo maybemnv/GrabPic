@@ -1,4 +1,4 @@
-# FaceFind - Executive Summary
+# GrabPic - Executive Summary
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -8,7 +8,7 @@
 ---
 
 ## Product Vision
-FaceFind eliminates the post-event photo distribution nightmare by using facial recognition to instantly deliver personalized photo collections to event attendees. Organizers upload once; attendees get their photos in seconds with a single selfie.
+GrabPic eliminates the post-event photo distribution nightmare by using facial recognition to instantly deliver personalized photo collections to event attendees. Organizers upload once; attendees get their photos in seconds with a single selfie.
 
 ## The Problem (Market Pain)
 - **Organizers:** Spend 5-10 hours manually sorting/sharing photos via Google Drive/WhatsApp

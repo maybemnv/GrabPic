@@ -1,4 +1,4 @@
-# FaceFind - Final Thoughts from "Senior PM"
+# GrabPic - Final Thoughts from "Senior PM"
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -32,7 +32,7 @@ This is a **solid 8.5/10 idea** with clear technical differentiation and a painf
 ## Your Competitive Advantage
 You understand both the ML stack AND modern web infrastructure. Most ML engineers can't ship products; most web devs avoid ML. You can do both. **That's your moat.**
 
-Now stop reading and start building. Week 1 starts Monday. Set a recurring calendar reminder: "FaceFind Dev Time" 20h/week. See you at launch. 🚀
+Now stop reading and start building. Week 1 starts Monday. Set a recurring calendar reminder: "GrabPic Dev Time" 20h/week. See you at launch. 🚀
 
 ---
 

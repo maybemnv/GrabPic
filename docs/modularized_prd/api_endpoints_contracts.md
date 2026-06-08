@@ -1,4 +1,4 @@
-# FaceFind - API Endpoints & Contracts
+# GrabPic - API Endpoints & Contracts
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -8,7 +8,7 @@
 ---
 
 ## Base URL
-- Production: `https://api.facefind.app`
+- Production: `https://api.GrabPic.app`
 - Development: `http://localhost:8787`
 
 ## Authentication
@@ -35,9 +35,9 @@ Create new event
 {
   "eventId": "evt_1a2b3c4d",
   "passcode": "123456",
-  "uploadUrl": "https://api.facefind.app/events/evt_1a2b3c4d/upload",
-  "shareUrl": "https://facefind.app/e/123456",
-  "qrCode": "https://api.facefind.app/qr/evt_1a2b3c4d",
+  "uploadUrl": "https://api.GrabPic.app/events/evt_1a2b3c4d/upload",
+  "shareUrl": "https://GrabPic.app/e/123456",
+  "qrCode": "https://api.GrabPic.app/qr/evt_1a2b3c4d",
   "expiresAt": 1741824000
 }
 ```
@@ -63,12 +63,12 @@ Get signed URLs for photo upload
   "uploadUrls": [
     {
       "photoId": "photo_abc123",
-      "uploadUrl": "https://r2.facefind.app/signed-url-1",
+      "uploadUrl": "https://r2.GrabPic.app/signed-url-1",
       "filename": "IMG_001.jpg"
     },
     {
       "photoId": "photo_def456",
-      "uploadUrl": "https://r2.facefind.app/signed-url-2",
+      "uploadUrl": "https://r2.GrabPic.app/signed-url-2",
       "filename": "IMG_002.jpg"
     }
   ]
@@ -163,8 +163,8 @@ Match selfie to event photos
     {
       "photoId": "photo_abc123",
       "similarity": 0.87,
-      "url": "https://cdn.facefind.app/evt_123/photo_abc123_800.jpg",
-      "thumbnailUrl": "https://cdn.facefind.app/evt_123/photo_abc123_200.jpg",
+      "url": "https://cdn.GrabPic.app/evt_123/photo_abc123_800.jpg",
+      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_abc123_200.jpg",
       "width": 4032,
       "height": 3024,
       "faces": [
@@ -177,8 +177,8 @@ Match selfie to event photos
     {
       "photoId": "photo_def456",
       "similarity": 0.73,
-      "url": "https://cdn.facefind.app/evt_123/photo_def456_800.jpg",
-      "thumbnailUrl": "https://cdn.facefind.app/evt_123/photo_def456_200.jpg",
+      "url": "https://cdn.GrabPic.app/evt_123/photo_def456_800.jpg",
+      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_def456_200.jpg",
       "width": 3024,
       "height": 4032,
       "faces": [
@@ -242,8 +242,8 @@ Get single photo with signed URL
 ```json
 {
   "photoId": "photo_abc123",
-  "url": "https://cdn.facefind.app/signed-url-expires-in-1h",
-  "thumbnailUrl": "https://cdn.facefind.app/thumb-signed-url",
+  "url": "https://cdn.GrabPic.app/signed-url-expires-in-1h",
+  "thumbnailUrl": "https://cdn.GrabPic.app/thumb-signed-url",
   "width": 4032,
   "height": 3024,
   "faces": [

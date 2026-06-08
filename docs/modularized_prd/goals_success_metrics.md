@@ -1,4 +1,4 @@
-# FaceFind - Goals & Success Metrics
+# GrabPic - Goals & Success Metrics
 
 **Version:** 1.0
 **Date:** February 9, 2026

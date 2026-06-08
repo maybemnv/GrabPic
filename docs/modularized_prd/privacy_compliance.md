@@ -1,4 +1,4 @@
-# FaceFind - Privacy & Compliance
+# GrabPic - Privacy & Compliance
 
 **Version:** 1.0
 **Date:** February 9, 2026

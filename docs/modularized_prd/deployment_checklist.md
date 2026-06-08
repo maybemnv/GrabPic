@@ -1,4 +1,4 @@
-# FaceFind - Deployment Checklist
+# GrabPic - Deployment Checklist
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -8,14 +8,14 @@
 ---
 
 ## Pre-Launch (Week 11)
-- [ ] Setup custom domain (facefind.app)
+- [ ] Setup custom domain (GrabPic.app)
 - [ ] Configure DNS (Cloudflare)
 - [ ] SSL certificates (auto via CF)
 - [ ] Environment variables in Vercel
 - [ ] Environment variables in Wrangler
 - [ ] Sentry error tracking
 - [ ] PostHog analytics
-- [ ] Setup status page (status.facefind.app)
+- [ ] Setup status page (status.GrabPic.app)
 
 ## Launch Day (Week 12)
 - [ ] Deploy frontend to Vercel

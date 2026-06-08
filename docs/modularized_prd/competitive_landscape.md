@@ -1,4 +1,4 @@
-# FaceFind - Competitive Landscape
+# GrabPic - Competitive Landscape
 
 **Version:** 1.0
 **Date:** February 9, 2026

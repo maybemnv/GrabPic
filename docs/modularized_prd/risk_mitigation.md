@@ -1,4 +1,4 @@
-# FaceFind - Risk Mitigation
+# GrabPic - Risk Mitigation
 
 **Version:** 1.0
 **Date:** February 9, 2026

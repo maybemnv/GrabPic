@@ -1,4 +1,4 @@
-# FaceFind - User Personas & Journey
+# GrabPic - User Personas & Journey
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -21,7 +21,7 @@
 4. Gets bombarded with "where's my photo?" messages
 5. Manually sends individual photos via DM
 
-**FaceFind Workflow (Delight):**
+**GrabPic Workflow (Delight):**
 1. Bulk upload photos (10 mins)
 2. Generate event code
 3. Share code with attendees
@@ -48,7 +48,7 @@ Landing    Email      Drag&Drop     Progress     QR Code       Dashboard        
 3. Downloads ~30, misses ~10 good ones
 4. Frustration with file organization
 
-**FaceFind Workflow (Delight):**
+**GrabPic Workflow (Delight):**
 1. Opens event link
 2. Takes selfie (3 seconds)
 3. Gets personalized gallery instantly

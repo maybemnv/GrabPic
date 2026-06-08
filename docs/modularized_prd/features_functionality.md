@@ -1,4 +1,4 @@
-# FaceFind - Features & Functionality
+# GrabPic - Features & Functionality
 
 **Version:** 1.0
 **Date:** February 9, 2026

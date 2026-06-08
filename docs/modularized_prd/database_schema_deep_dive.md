@@ -1,4 +1,4 @@
-# FaceFind - Database Schema Deep Dive
+# GrabPic - Database Schema Deep Dive
 
 **Version:** 1.0
 **Date:** February 9, 2026

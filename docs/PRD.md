@@ -1,4 +1,4 @@
-# FaceFind - Product Requirements Document (PRD)
+# GrabPic - Product Requirements Document (PRD)
 
 **Version:** 1.0  
 **Date:** February 9, 2026  
@@ -10,7 +10,7 @@
 ## Executive Summary
 
 ### Product Vision
-FaceFind eliminates the post-event photo distribution nightmare by using facial recognition to instantly deliver personalized photo collections to event attendees. Organizers upload once; attendees get their photos in seconds with a single selfie.
+GrabPic eliminates the post-event photo distribution nightmare by using facial recognition to instantly deliver personalized photo collections to event attendees. Organizers upload once; attendees get their photos in seconds with a single selfie.
 
 ### The Problem (Market Pain)
 - **Organizers:** Spend 5-10 hours manually sorting/sharing photos via Google Drive/WhatsApp
@@ -93,7 +93,7 @@ Automated facial recognition pipeline that:
 4. Gets bombarded with "where's my photo?" messages
 5. Manually sends individual photos via DM
 
-**FaceFind Workflow (Delight):**
+**GrabPic Workflow (Delight):**
 1. Bulk upload photos (10 mins)
 2. Generate event code
 3. Share code with attendees
@@ -120,7 +120,7 @@ Landing    Email      Drag&Drop     Progress     QR Code       Dashboard        
 3. Downloads ~30, misses ~10 good ones
 4. Frustration with file organization
 
-**FaceFind Workflow (Delight):**
+**GrabPic Workflow (Delight):**
 1. Opens event link
 2. Takes selfie (3 seconds)
 3. Gets personalized gallery instantly
@@ -445,7 +445,7 @@ import modal
 from facenet_pytorch import MTCNN, InceptionResnetV1
 import torch
 
-stub = modal.Stub("facefind-processor")
+stub = modal.Stub("GrabPic-processor")
 
 @stub.function(
     gpu="T4",
@@ -652,7 +652,7 @@ CREATE TABLE match_sessions (
 ## API Endpoints & Contracts
 
 ### Base URL
-- Production: `https://api.facefind.app`
+- Production: `https://api.GrabPic.app`
 - Development: `http://localhost:8787`
 
 ### Authentication
@@ -679,9 +679,9 @@ Create new event
 {
   "eventId": "evt_1a2b3c4d",
   "passcode": "123456",
-  "uploadUrl": "https://api.facefind.app/events/evt_1a2b3c4d/upload",
-  "shareUrl": "https://facefind.app/e/123456",
-  "qrCode": "https://api.facefind.app/qr/evt_1a2b3c4d",
+  "uploadUrl": "https://api.GrabPic.app/events/evt_1a2b3c4d/upload",
+  "shareUrl": "https://GrabPic.app/e/123456",
+  "qrCode": "https://api.GrabPic.app/qr/evt_1a2b3c4d",
   "expiresAt": 1741824000
 }
 ```
@@ -707,12 +707,12 @@ Get signed URLs for photo upload
   "uploadUrls": [
     {
       "photoId": "photo_abc123",
-      "uploadUrl": "https://r2.facefind.app/signed-url-1",
+      "uploadUrl": "https://r2.GrabPic.app/signed-url-1",
       "filename": "IMG_001.jpg"
     },
     {
       "photoId": "photo_def456",
-      "uploadUrl": "https://r2.facefind.app/signed-url-2",
+      "uploadUrl": "https://r2.GrabPic.app/signed-url-2",
       "filename": "IMG_002.jpg"
     }
   ]
@@ -807,8 +807,8 @@ Match selfie to event photos
     {
       "photoId": "photo_abc123",
       "similarity": 0.87,
-      "url": "https://cdn.facefind.app/evt_123/photo_abc123_800.jpg",
-      "thumbnailUrl": "https://cdn.facefind.app/evt_123/photo_abc123_200.jpg",
+      "url": "https://cdn.GrabPic.app/evt_123/photo_abc123_800.jpg",
+      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_abc123_200.jpg",
       "width": 4032,
       "height": 3024,
       "faces": [
@@ -821,8 +821,8 @@ Match selfie to event photos
     {
       "photoId": "photo_def456",
       "similarity": 0.73,
-      "url": "https://cdn.facefind.app/evt_123/photo_def456_800.jpg",
-      "thumbnailUrl": "https://cdn.facefind.app/evt_123/photo_def456_200.jpg",
+      "url": "https://cdn.GrabPic.app/evt_123/photo_def456_800.jpg",
+      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_def456_200.jpg",
       "width": 3024,
       "height": 4032,
       "faces": [
@@ -886,8 +886,8 @@ Get single photo with signed URL
 ```json
 {
   "photoId": "photo_abc123",
-  "url": "https://cdn.facefind.app/signed-url-expires-in-1h",
-  "thumbnailUrl": "https://cdn.facefind.app/thumb-signed-url",
+  "url": "https://cdn.GrabPic.app/signed-url-expires-in-1h",
+  "thumbnailUrl": "https://cdn.GrabPic.app/thumb-signed-url",
   "width": 4032,
   "height": 3024,
   "faces": [
@@ -931,7 +931,7 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 
 stub = modal.Stub(
-    "facefind-processor",
+    "GrabPic-processor",
     secrets=[modal.Secret.from_name("turso-credentials")]
 )
 
@@ -1089,11 +1089,11 @@ export async function onUploadComplete(req: Request) {
   
   // Get photo URLs from R2
   const photoUrls = photoIds.map(id => 
-    `https://r2.facefind.app/events/${eventId}/${id}.jpg`
+    `https://r2.GrabPic.app/events/${eventId}/${id}.jpg`
   )
   
   // Trigger Modal function
-  const modalUrl = "https://modal.com/facefind-processor/process-event"
+  const modalUrl = "https://modal.com/GrabPic-processor/process-event"
   const response = await fetch(modalUrl, {
     method: 'POST',
     headers: {
@@ -1513,7 +1513,7 @@ pip install modal
 
 ### Monorepo Structure
 ```
-facefind/
+GrabPic/
 ├── apps/
 │   ├── web/                 # Next.js frontend
 │   │   ├── src/
@@ -1554,8 +1554,8 @@ pnpm create cloudflare@latest . -- --framework=hono
 # Setup Turso
 brew install tursodatabase/tap/turso
 turso auth signup
-turso db create facefind-dev
-turso db show facefind-dev  # Get URL + token
+turso db create GrabPic-dev
+turso db show GrabPic-dev  # Get URL + token
 
 # Setup Modal
 modal setup
@@ -1567,14 +1567,14 @@ modal token new
 ## Deployment Checklist
 
 ### Pre-Launch (Week 11)
-- [ ] Setup custom domain (facefind.app)
+- [ ] Setup custom domain (GrabPic.app)
 - [ ] Configure DNS (Cloudflare)
 - [ ] SSL certificates (auto via CF)
 - [ ] Environment variables in Vercel
 - [ ] Environment variables in Wrangler
 - [ ] Sentry error tracking
 - [ ] PostHog analytics
-- [ ] Setup status page (status.facefind.app)
+- [ ] Setup status page (status.GrabPic.app)
 
 ### Launch Day (Week 12)
 - [ ] Deploy frontend to Vercel
@@ -1621,7 +1621,7 @@ This is a **solid 8.5/10 idea** with clear technical differentiation and a painf
 ### Your Competitive Advantage
 You understand both the ML stack AND modern web infrastructure. Most ML engineers can't ship products; most web devs avoid ML. You can do both. **That's your moat.**
 
-Now stop reading and start building. Week 1 starts Monday. Set a recurring calendar reminder: "FaceFind Dev Time" 20h/week. See you at launch. 🚀
+Now stop reading and start building. Week 1 starts Monday. Set a recurring calendar reminder: "GrabPic Dev Time" 20h/week. See you at launch. 🚀
 
 ---
 

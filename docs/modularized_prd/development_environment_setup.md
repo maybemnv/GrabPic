@@ -1,4 +1,4 @@
-# FaceFind - Development Environment Setup
+# GrabPic - Development Environment Setup
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -24,7 +24,7 @@ pip install modal
 
 ## Monorepo Structure
 ```
-facefind/
+GrabPic/
 ├── apps/
 │   ├── web/                 # Next.js frontend
 │   │   ├── src/
@@ -65,8 +65,8 @@ pnpm create cloudflare@latest . -- --framework=hono
 # Setup Turso
 brew install tursodatabase/tap/turso
 turso auth signup
-turso db create facefind-dev
-turso db show facefind-dev  # Get URL + token
+turso db create GrabPic-dev
+turso db show GrabPic-dev  # Get URL + token
 
 # Setup Modal
 modal setup

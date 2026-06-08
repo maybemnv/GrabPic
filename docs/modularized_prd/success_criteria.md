@@ -1,4 +1,4 @@
-# FaceFind - Success Criteria (3-Month Post-Launch)
+# GrabPic - Success Criteria (3-Month Post-Launch)
 
 **Version:** 1.0
 **Date:** February 9, 2026

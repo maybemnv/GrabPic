@@ -1,4 +1,4 @@
-# FaceFind - Timeline & Milestones
+# GrabPic - Timeline & Milestones
 
 **Version:** 1.0
 **Date:** February 9, 2026

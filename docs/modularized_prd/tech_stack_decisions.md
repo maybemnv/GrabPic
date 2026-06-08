@@ -1,4 +1,4 @@
-# FaceFind - Tech Stack Decisions (Optimized for Cost + Speed)
+# GrabPic - Tech Stack Decisions (Optimized for Cost + Speed)
 
 **Version:** 1.0
 **Date:** February 9, 2026
@@ -167,7 +167,7 @@ import modal
 from facenet_pytorch import MTCNN, InceptionResnetV1
 import torch
 
-stub = modal.Stub("facefind-processor")
+stub = modal.Stub("GrabPic-processor")
 
 @stub.function(
     gpu="T4",

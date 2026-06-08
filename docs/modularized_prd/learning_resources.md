@@ -1,4 +1,4 @@
-# FaceFind - Learning Resources
+# GrabPic - Learning Resources
 
 **Version:** 1.0
 **Date:** February 9, 2026
