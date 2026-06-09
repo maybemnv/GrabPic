@@ -43,6 +43,9 @@
 - [x] Noise texture SVG utilities (`.noise-overlay`, `.bg-noise`)
 - [x] Framer-motion animations (pull-up text, fade-in, staggered cards)
 - [x] Lucide-react icons (ArrowRight, Check, Menu, etc.)
+- [x] Refined dark mode: gradient card surfaces, glass borders, depth shadows
+- [x] Features hierarchy: video card glow, numbered badges, hover elevation
+- [x] Consistent card styling across all sections (rounded-2xl, borders, shadows)
 
 ## API Layer (apps/api)
 
