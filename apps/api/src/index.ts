@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { events } from './routes/events'
 import { match } from './routes/match'
 import { upload } from './routes/upload'
+import { qr } from './routes/qr'
 import { createLogger } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 
@@ -29,6 +30,8 @@ app.onError((err, c) => {
 app.route('/events', events)
 app.route('/events/:eventId/match', match)
 app.route('/events/:eventId/upload', upload)
+
+app.route('/qr', qr)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 

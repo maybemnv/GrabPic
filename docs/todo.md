@@ -92,8 +92,8 @@
 - [x] `/` — landing page (cinematic dark theme)
 - [x] `/organizer` — organizer dashboard
 - [x] `/attendee` — attendee portal
-- [ ] QR code generation + scanning endpoint
-- [ ] Catch-all error boundary pages
+- [x] QR code generation + scanning endpoint
+- [x] Catch-all error boundary pages
 
 ## ML Processing (ml/)
 
@@ -179,8 +179,8 @@
 - [x] README with architecture, setup, testing, docs links
 - [x] Resolved open_questions.md
 - [x] Full project todo.md
-- [ ] Add deployment guide
-- [ ] Add API usage examples
+- [x] Add deployment guide
+- [x] Add API usage examples
 
 ## Deployment Pipeline
 
