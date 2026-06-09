@@ -22,6 +22,8 @@ const uploadSchema = z.object({
 
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
+  const sentry = c.get('sentry') as any
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
@@ -50,14 +52,19 @@ app.post('/', async (c) => {
       }),
     )
 
+    log?.info('upload: urls generated', { eventId, count: photos.length })
     return c.json({ uploadUrls })
   } catch (err) {
+    log?.error('upload: generate urls error', { eventId, error: String(err) })
+    sentry?.captureException(err, { route: 'generateUploadUrls', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
 app.post('/confirm', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
+  const sentry = c.get('sentry') as any
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
@@ -98,10 +105,13 @@ app.post('/confirm', async (c) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ event_id: eventId, photo_ids: photoIds }),
-        }).catch(() => {}),
+        }).catch((modalErr) => {
+          sentry?.captureException(modalErr, { route: 'modalWebhook', eventId })
+        }),
       )
     }
 
+    log?.info('upload: confirmed', { eventId, photoCount: photoIds.length })
     return c.json(
       {
         status: 'processing',
@@ -111,6 +121,8 @@ app.post('/confirm', async (c) => {
       202,
     )
   } catch (err) {
+    log?.error('upload: confirm error', { eventId, error: String(err) })
+    sentry?.captureException(err, { route: 'confirmUpload', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })

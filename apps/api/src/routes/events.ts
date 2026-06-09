@@ -25,6 +25,8 @@ function generateId(prefix: string): string {
 }
 
 app.post('/', async (c) => {
+  const log = c.get('logger') as any
+  const sentry = c.get('sentry') as any
   try {
     const body = await c.req.json()
     const parsed = createEventSchema.safeParse(body)
@@ -48,6 +50,8 @@ app.post('/', async (c) => {
       args: [eventId, name, passcode, now, now + expiryDays * 86400, organizerEmail, organizerName],
     })
 
+    log?.info('event: created', { eventId, name, organizerEmail })
+
     return c.json(
       {
         eventId,
@@ -60,12 +64,15 @@ app.post('/', async (c) => {
       201,
     )
   } catch (err) {
+    log?.error('event: create error', { error: String(err) })
+    sentry?.captureException(err, { route: 'createEvent' })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
 app.get('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
@@ -78,6 +85,7 @@ app.get('/:eventId', async (c) => {
   })
 
   if (result.rows.length === 0) {
+    log?.warn('event: not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
@@ -86,6 +94,7 @@ app.get('/:eventId', async (c) => {
 
 app.get('/:eventId/status', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
@@ -98,6 +107,7 @@ app.get('/:eventId/status', async (c) => {
   })
 
   if (result.rows.length === 0) {
+    log?.warn('event: status not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
@@ -116,6 +126,8 @@ app.get('/:eventId/status', async (c) => {
 
 app.delete('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
+  const sentry = c.get('sentry') as any
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
@@ -128,6 +140,7 @@ app.delete('/:eventId', async (c) => {
   })
 
   if (result.rows.length === 0) {
+    log?.warn('event: delete not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
@@ -138,6 +151,9 @@ app.delete('/:eventId', async (c) => {
     sql: 'DELETE FROM events WHERE id = ?',
     args: [eventId],
   })
+
+  log?.info('event: deleted', { eventId, photosDeleted })
+  sentry?.captureMessage('Event deleted', { eventId, photosDeleted })
 
   return c.json({ deleted: true, photosDeleted, storageFreed })
 })

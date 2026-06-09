@@ -5,11 +5,14 @@ const app = new Hono<{ Bindings: Env }>()
 
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
+  const log = c.get('logger') as any
+  const sentry = c.get('sentry') as any
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
 
   const startTime = Date.now()
+  let matchedCount = 0
 
   try {
     const {
@@ -37,14 +40,17 @@ app.post('/', async (c) => {
     })
 
     if (event.rows.length === 0) {
+      log?.warn('match: event not found', { eventId })
       return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
     }
 
     if (event.rows[0].passcode !== passcode) {
+      log?.warn('match: invalid passcode', { eventId })
       return c.json({ error: 'Invalid passcode', code: 'UNAUTHORIZED' }, 401)
     }
 
     if (event.rows[0].status !== 'ready') {
+      log?.info('match: event not ready', { eventId, status: event.rows[0].status })
       return c.json({ error: 'Event still processing', code: 'NOT_READY' }, 400)
     }
 
@@ -71,12 +77,36 @@ app.post('/', async (c) => {
       }))
       .filter((m: any) => m.similarity >= (threshold as number))
 
+    matchedCount = matches.length
+
+    const processingTime = Date.now() - startTime
+    log?.info('match: completed', { eventId, matchedCount, threshold, processingTime })
+
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const sessionId = `ms_${crypto.randomUUID().slice(0, 8)}`
+          const cf = c.req.raw.cf as any
+          const userIp = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || ''
+          await db.execute({
+            sql: `INSERT INTO match_sessions (id, event_id, user_ip, matched_count, similarity_threshold, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
+            args: [sessionId, eventId, userIp, matchedCount, threshold, Math.floor(Date.now() / 1000)],
+          })
+        } catch (trackErr) {
+          log?.error('match: failed to track session', { eventId, error: String(trackErr) })
+        }
+      })(),
+    )
+
     return c.json({
       matches,
-      totalMatches: matches.length,
-      processingTime: Date.now() - startTime,
+      totalMatches: matchedCount,
+      processingTime,
     })
   } catch (err) {
+    log?.error('match: error', { eventId, error: String(err) })
+    sentry?.captureException(err, { route: 'match', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
