@@ -232,7 +232,7 @@ function HeroSection() {
 function AboutSection() {
   return (
     <section id="story" className="bg-black px-4 py-20 md:py-32">
-      <div className="mx-auto max-w-6xl bg-[#101010] rounded-2xl md:rounded-[2rem] px-6 py-12 md:px-16 md:py-20 text-center">
+      <div className="mx-auto max-w-6xl bg-gradient-to-br from-[#101010] to-[#1a1a1a] rounded-2xl md:rounded-[2rem] px-6 py-12 md:px-16 md:py-20 text-center shadow-2xl shadow-black/40 border border-white/[0.04]">
         <FadeUp delay={0.1}>
           <p className="text-[10px] sm:text-xs tracking-widest uppercase mb-6" style={{ color: '#DEDBC8' }}>
             Event Photography
@@ -324,8 +324,9 @@ function FeaturesSection() {
           <FeatureCard
             index={0}
             isInView={isInView}
-            className="lg:col-span-2 lg:row-span-2 relative overflow-hidden rounded-2xl group cursor-pointer"
+            className="lg:col-span-2 lg:row-span-2 relative overflow-hidden rounded-2xl group cursor-pointer border border-white/[0.04] shadow-2xl shadow-black/40 transition-shadow duration-500 hover:shadow-[#DEDBC8]/10"
           >
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none z-10" />
             <video
               autoPlay
               loop
@@ -335,12 +336,19 @@ function FeaturesSection() {
             >
               <source src={FEATURE_VIDEO} type="video/mp4" />
             </video>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-            <div className="absolute bottom-4 left-4 md:bottom-6 md:left-6 flex items-center gap-3">
-              <p className="text-sm md:text-base font-medium" style={{ color: '#E1E0CC' }}>
-                Your creative canvas.
-              </p>
-              <ArrowRight className="w-4 h-4 md:w-5 md:h-5 transition-transform group-hover:translate-x-1" style={{ color: '#E1E0CC' }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+            <div className="absolute bottom-4 left-4 md:bottom-6 md:left-6 flex items-center gap-3 z-20">
+              <div>
+                <p className="text-[10px] sm:text-xs font-medium tracking-widest uppercase mb-0.5" style={{ color: 'rgba(225, 224, 204, 0.4)' }}>
+                  Featured
+                </p>
+                <p className="text-sm md:text-base font-medium" style={{ color: '#E1E0CC' }}>
+                  Your creative canvas.
+                </p>
+              </div>
+              <span className="flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/10 backdrop-blur-sm transition-all duration-500 group-hover:bg-primary/20 group-hover:scale-110">
+                <ArrowRight className="w-4 h-4 md:w-5 md:h-5 transition-transform group-hover:translate-x-0.5" style={{ color: '#E1E0CC' }} />
+              </span>
             </div>
           </FeatureCard>
 
@@ -352,37 +360,46 @@ function FeaturesSection() {
               className="rounded-2xl group cursor-pointer"
             >
               <div
-                className="flex flex-col h-full p-4 md:p-5 rounded-2xl transition-colors duration-300"
-                style={{ backgroundColor: '#212121' }}
+                className="flex flex-col h-full p-4 md:p-5 rounded-2xl transition-all duration-500 shadow-lg shadow-black/20 border border-white/[0.04] hover:border-white/[0.1]"
+                style={{
+                  background: 'linear-gradient(135deg, #212121 0%, #2a2a2a 100%)',
+                }}
               >
-                <img
-                  src={feature.icon}
-                  alt=""
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded object-cover mb-4"
-                />
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="text-sm sm:text-base font-medium" style={{ color: '#E1E0CC' }}>
-                    {feature.title}
-                  </h3>
-                  <span className="text-xs sm:text-sm text-gray-500">{feature.number}</span>
+                <div className="flex items-start justify-between mb-4">
+                  <img
+                    src={feature.icon}
+                    alt=""
+                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover ring-1 ring-white/10"
+                  />
+                  <span className="text-xs sm:text-sm font-mono font-bold" style={{ color: 'rgba(225, 224, 204, 0.3)' }}>
+                    {feature.number}
+                  </span>
                 </div>
 
-                <ul className="space-y-2 mb-auto">
+                <h3 className="text-sm sm:text-base font-semibold mb-3" style={{ color: '#E1E0CC' }}>
+                  {feature.title}
+                </h3>
+
+                <ul className="space-y-2.5 mb-auto">
                   {feature.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2">
-                      <Check className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: '#DEDBC8' }} />
-                      <span className="text-xs sm:text-sm text-gray-400">{item}</span>
+                    <li key={item} className="flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Check className="w-2.5 h-2.5" style={{ color: '#DEDBC8' }} />
+                      </span>
+                      <span className="text-xs sm:text-sm leading-relaxed text-gray-400">{item}</span>
                     </li>
                   ))}
                 </ul>
 
-                <button className="group/btn inline-flex items-center gap-1.5 mt-4 text-xs sm:text-sm font-medium transition-all hover:gap-2.5 self-start">
-                  <span style={{ color: '#DEDBC8' }}>Learn more</span>
-                  <ArrowRight
-                    className="w-3.5 h-3.5 -rotate-45 transition-transform group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5"
-                    style={{ color: '#DEDBC8' }}
-                  />
-                </button>
+                <div className="mt-5 pt-4 border-t border-white/[0.04]">
+                  <button className="group/btn inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium transition-all hover:gap-2.5">
+                    <span style={{ color: '#DEDBC8' }}>Learn more</span>
+                    <ArrowRight
+                      className="w-3.5 h-3.5 -rotate-45 transition-transform group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5"
+                      style={{ color: '#DEDBC8' }}
+                    />
+                  </button>
+                </div>
               </div>
             </FeatureCard>
           ))}
@@ -422,14 +439,19 @@ function HowItWorksSection() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {steps.map((step, i) => (
             <FadeUp key={step.number} delay={i * 0.15}>
-              <div className="bg-[#101010] rounded-2xl p-5 md:p-6 h-full flex flex-col">
-                <span className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-600 mb-3">
+              <div
+                className="rounded-2xl p-5 md:p-6 h-full flex flex-col border border-white/[0.04] shadow-lg shadow-black/20 transition-all duration-500 hover:border-white/[0.08] hover:-translate-y-0.5"
+                style={{
+                  background: 'linear-gradient(135deg, #101010 0%, #1a1a1a 100%)',
+                }}
+              >
+                <span className="text-3xl sm:text-4xl md:text-5xl font-black mb-3" style={{ color: 'rgba(225, 224, 204, 0.08)' }}>
                   {step.number}
                 </span>
-                <h3 className="text-sm sm:text-base font-medium mb-2" style={{ color: '#E1E0CC' }}>
+                <h3 className="text-sm sm:text-base font-semibold mb-2" style={{ color: '#E1E0CC' }}>
                   {step.title}
                 </h3>
-                <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">{step.desc}</p>
+                <p className="text-xs sm:text-sm text-gray-500 leading-relaxed flex-1">{step.desc}</p>
               </div>
             </FadeUp>
           ))}
@@ -442,7 +464,7 @@ function HowItWorksSection() {
 function PrivacySection() {
   return (
     <section id="privacy" className="bg-black px-4 py-20 md:py-32">
-      <div className="mx-auto max-w-6xl text-center">
+      <div className="mx-auto max-w-4xl bg-gradient-to-br from-[#101010] to-[#1a1a1a] rounded-2xl md:rounded-[2rem] px-6 py-12 md:px-16 md:py-20 shadow-2xl shadow-black/40 border border-white/[0.04] text-center">
         <FadeUp delay={0.1}>
           <p className="text-[10px] sm:text-xs tracking-widest uppercase mb-4" style={{ color: '#DEDBC8' }}>
             Privacy First
@@ -469,7 +491,7 @@ function PrivacySection() {
 
 function FooterSection() {
   return (
-    <footer id="contact" className="bg-black border-t border-white/10 px-4 py-12 md:py-16">
+    <footer id="contact" className="bg-gradient-to-b from-black to-[#0a0a0a] border-t border-white/[0.04] px-4 py-12 md:py-16">
       <div className="mx-auto max-w-7xl">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12">
           <div>
