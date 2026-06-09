@@ -24,13 +24,16 @@ const NAV_ITEMS = [
 
 function CTAButton({
   children,
+  href = '#',
   className = '',
 }: {
   children: React.ReactNode
+  href?: string
   className?: string
 }) {
   return (
-    <button
+    <a
+      href={href}
       className={`group inline-flex items-center gap-2 rounded-full px-5 py-2.5 sm:px-6 sm:py-3 text-black text-sm sm:text-base font-medium transition-all hover:gap-3 ${className}`}
       style={{ backgroundColor: '#DEDBC8' }}
     >
@@ -38,7 +41,7 @@ function CTAButton({
       <span className="bg-black rounded-full w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center transition-transform group-hover:scale-110">
         <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" style={{ color: '#DEDBC8' }} />
       </span>
-    </button>
+    </a>
   )
 }
 
@@ -207,8 +210,16 @@ function HeroSection() {
                 </p>
               </FadeUp>
 
-              <FadeUp delay={0.7}>
-                <CTAButton>Get Started</CTAButton>
+              <FadeUp delay={0.7} className="flex flex-wrap gap-3">
+                <CTAButton href="/organizer">Get Started</CTAButton>
+                <a
+                  href="/attendee"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-medium transition-all hover:border-primary/50 hover:gap-3"
+                  style={{ color: 'rgba(225, 224, 204, 0.8)' }}
+                >
+                  Find My Photos
+                  <ArrowRight className="w-4 h-4" />
+                </a>
               </FadeUp>
             </div>
           </div>
@@ -246,7 +257,7 @@ function AboutSection() {
         </div>
 
         <FadeUp delay={0.3} className="mt-10">
-          <CTAButton>Explore the platform</CTAButton>
+          <CTAButton href="/organizer">Explore the platform</CTAButton>
         </FadeUp>
       </div>
     </section>
@@ -378,7 +389,7 @@ function FeaturesSection() {
         </div>
 
         <FadeUp delay={0.3} className="mt-16 text-center">
-          <CTAButton>Start creating</CTAButton>
+          <CTAButton href="/organizer">Start creating</CTAButton>
         </FadeUp>
       </div>
     </section>
