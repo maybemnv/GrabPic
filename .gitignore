@@ -17,6 +17,6 @@ node_modules
 *.tsbuildinfo
 .next/
 dist/
-
+.wrangler/
 # Environment variables (user-provided secrets)
 .env
