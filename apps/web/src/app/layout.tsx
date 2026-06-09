@@ -2,14 +2,19 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'GrabPic',
-  description: 'Facial recognition-powered event photo distribution',
+  title: 'GrabPic — Event Photos, Instantly Matched',
+  description:
+    'Upload event photos once. Attendees take a selfie and get their personalized gallery in under 5 seconds.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50">{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body className="bg-black">{children}</body>
     </html>
   )
 }
