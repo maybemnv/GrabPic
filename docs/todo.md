@@ -156,11 +156,11 @@
 
 ## Monitoring & Analytics
 
-- [ ] Set up Sentry DSN in .env + wrangler.toml
-- [ ] Set up PostHog in .env + frontend
-- [ ] Add structured logging to Worker routes
-- [ ] Add match_sessions tracking to match endpoint
-- [ ] Create status page (status.grabpic.app)
+- [x] Set up Sentry DSN in .env + wrangler.toml
+- [x] Set up PostHog in .env + frontend
+- [x] Add structured logging to Worker routes
+- [x] Add match_sessions tracking to match endpoint
+- [x] Create status page (status.grabpic.app)
 
 ## Security & Privacy
 
