@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
+import { PostHogProvider } from '../components/PostHogProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,7 +16,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body className="bg-black">{children}</body>
+      <body className="bg-black">
+        <Suspense>
+          <PostHogProvider>{children}</PostHogProvider>
+        </Suspense>
+      </body>
     </html>
   )
 }

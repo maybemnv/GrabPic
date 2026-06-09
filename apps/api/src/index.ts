@@ -32,6 +32,19 @@ app.route('/events/:eventId/upload', upload)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
+app.get('/health/processing', async (c) => {
+  try {
+    const db = (await import('@libsql/client')).createClient({
+      url: c.env.TURSO_URL,
+      authToken: c.env.TURSO_TOKEN,
+    })
+    await db.execute('SELECT 1')
+    return c.json({ status: 'ok', database: 'connected' })
+  } catch {
+    return c.json({ status: 'error', database: 'disconnected' }, 503)
+  }
+})
+
 export default app
 
 export interface Env {
