@@ -5,7 +5,7 @@
 - [x] pnpm workspace + Turborepo config
 - [x] Shared TypeScript config (packages/config)
 - [x] `apps/` and `packages/` directory structure
-- [x] .gitignore with node_modules, .turbo, .env
+- [x] .gitignore with node_modules, .turbo, .env, .next
 - [x] eslint + prettier setup
 
 ## Shared Packages
@@ -25,6 +25,24 @@
 ### packages/config
 - [x] Shared tsconfig.base.json
 - [x] Shared eslint config
+
+## Landing Page (root `/`)
+
+- [x] Cinematic dark theme (black bg, warm cream `#E1E0CC`/`#DEDBC8` accents)
+- [x] Hero section with full-screen video + noise overlay + gradient
+- [x] Giant "GrabPic" pull-up heading with asterisk
+- [x] CTA buttons → `/organizer` (primary) and `/attendee` (secondary)
+- [x] About section with scroll-linked character opacity text reveal
+- [x] Features section: 4-column grid (video card + 3 feature cards)
+- [x] How It Works section: 4-step numbered flow
+- [x] Privacy section with biometric data protection messaging
+- [x] Footer with product links, contact, legal
+- [x] Smooth fixed navbar (transparent → solid on scroll, backdrop-blur)
+- [x] Mobile hamburger menu
+- [x] Google Fonts (Almarai + Instrument Serif)
+- [x] Noise texture SVG utilities (`.noise-overlay`, `.bg-noise`)
+- [x] Framer-motion animations (pull-up text, fade-in, staggered cards)
+- [x] Lucide-react icons (ArrowRight, Check, Menu, etc.)
 
 ## API Layer (apps/api)
 
@@ -46,23 +64,33 @@
 
 ## Frontend (apps/web)
 
-### Organizer Dashboard
-- [x] Event creation form (name, email, name)
-- [x] Photo upload flow (multi-file select + upload to R2)
-- [x] Upload progress status messages
-- [x] Event status polling after upload
+### Organizer Dashboard (`/organizer`)
+- [x] Dark theme matching landing page
+- [x] Event creation form → real API (`POST /events`)
+- [x] Photo upload → signed URLs → direct R2 upload
+- [x] Upload confirm + auto-poll status every 5s
+- [x] Passcode copy button + share link
+- [x] Error handling with visible error box
 
-### Attendee Portal
-- [x] Event code/passcode entry form
+### Attendee Portal (`/attendee`)
+- [x] Dark theme matching landing page
+- [x] Event code + ID entry → `GET /events/:id` validation
 - [x] Camera access via MediaDevices API (WebRTC)
-- [x] Selfie capture with canvas
-- [x] Selfie → match → gallery display
-- [x] Consent checkbox (BIPA/GDPR)
+- [x] Selfie capture with canvas preview + retake
+- [x] Consent checkbox (BIPA/GDPR) — blocks match without it
+- [x] Selfie → `POST /match` → gallery display
+- [x] Match percentage, processing time, photo count
+
+### Frontend API Client
+- [x] `src/lib/api.ts` — typed functions for all endpoints
+- [x] `NEXT_PUBLIC_API_URL` env var with localhost fallback
 
 ### Routing
-- [x] (organizer) route group — `/organizer`
-- [x] (attendee) route group — `/e/[code]`
+- [x] `/` — landing page (cinematic dark theme)
+- [x] `/organizer` — organizer dashboard
+- [x] `/attendee` — attendee portal
 - [ ] QR code generation + scanning endpoint
+- [ ] Catch-all error boundary pages
 
 ## ML Processing (ml/)
 
@@ -104,7 +132,7 @@
 
 ### Vercel
 - [ ] Deploy frontend
-- [ ] Configure environment variables (API_BASE_URL)
+- [ ] Configure environment variables (NEXT_PUBLIC_API_URL)
 - [ ] Set up custom domain (grabpic.app)
 - [ ] Configure Sentry + PostHog
 
@@ -133,10 +161,10 @@
 
 ## Security & Privacy
 
-- [x] Consent gate before selfie capture (checkbox)
+- [x] Consent gate before selfie capture (checkbox, blocks match)
 - [x] Embedding isolation per event (no cross-event sharing)
-- [ ] 30-day auto-expiry cron job
-- [ ] Right to deletion cascade (DELETE /events/:id)
+- [x] Right to deletion cascade (DELETE /events/:id)
+- [ ] 30-day auto-expiry cron job (scheduled Worker)
 - [ ] JWT-based organizer auth (future)
 - [ ] Rate limiting on match endpoint
 
@@ -145,8 +173,9 @@
 - [x] AGENTS.md with architecture decisions and rules
 - [x] 8 engineering docs in docs/modularized_prd/
 - [x] .env.example with all required vars
-- [x] README with architecture, setup, testing, docs table
+- [x] README with architecture, setup, testing, docs links
 - [x] Resolved open_questions.md
+- [x] Full project todo.md
 - [ ] Add deployment guide
 - [ ] Add API usage examples
 
