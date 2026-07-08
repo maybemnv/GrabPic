@@ -102,7 +102,10 @@ sequenceDiagram
 ```bash
 # 1. Install dependencies
 pnpm install
-pip install -r ml/requirements.txt
+cd \GrabPic\ml
+uv venv --python 3.11
+.venv\Scripts\activate
+uv add -r .\requirements.txt
 
 # 2. Copy env template and fill in your secrets
 cp .env.example .env
