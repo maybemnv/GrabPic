@@ -1,8 +1,15 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../index'
+import type { AppContext } from '../index'
 
-const app = new Hono<{ Bindings: Env }>()
+interface SignedUrlBucket extends R2Bucket {
+  createSignedUrl(
+    key: string,
+    options: { expiration: number; method: 'PUT' | 'GET' | 'DELETE' },
+  ): Promise<string>
+}
+
+const app = new Hono<AppContext>()
 
 const uploadSchema = z.object({
   photos: z
@@ -22,8 +29,8 @@ const uploadSchema = z.object({
 
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
-  const sentry = c.get('sentry') as any
+  const log = c.get('logger')
+  const sentry = c.get('sentry')
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
@@ -36,14 +43,14 @@ app.post('/', async (c) => {
     }
 
     const { photos } = parsed.data
-    const bucket = c.env.PHOTOS
+    const bucket = c.env.PHOTOS as SignedUrlBucket
 
     const uploadUrls = await Promise.all(
       photos.map(async (photo) => {
         const photoId = `photo_${crypto.randomUUID().slice(0, 8)}`
         const key = `events/${eventId}/${photoId}.jpg`
 
-        const uploadUrl = await (bucket as any).createSignedUrl(key, {
+        const uploadUrl = await bucket.createSignedUrl(key, {
           expiration: Math.floor(Date.now() / 1000) + 3600,
           method: 'PUT',
         })
@@ -52,19 +59,19 @@ app.post('/', async (c) => {
       }),
     )
 
-    log?.info('upload: urls generated', { eventId, count: photos.length })
+    log.info('upload: urls generated', { eventId, count: photos.length })
     return c.json({ uploadUrls })
   } catch (err) {
-    log?.error('upload: generate urls error', { eventId, error: String(err) })
-    sentry?.captureException(err, { route: 'generateUploadUrls', eventId })
+    log.error('upload: generate urls error', { eventId, error: String(err) })
+    sentry.captureException(err, { route: 'generateUploadUrls', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
 app.post('/confirm', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
-  const sentry = c.get('sentry') as any
+  const log = c.get('logger')
+  const sentry = c.get('sentry')
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
@@ -106,12 +113,12 @@ app.post('/confirm', async (c) => {
           },
           body: JSON.stringify({ event_id: eventId, photo_ids: photoIds }),
         }).catch((modalErr) => {
-          sentry?.captureException(modalErr, { route: 'modalWebhook', eventId })
+          sentry.captureException(modalErr, { route: 'modalWebhook', eventId })
         }),
       )
     }
 
-    log?.info('upload: confirmed', { eventId, photoCount: photoIds.length })
+    log.info('upload: confirmed', { eventId, photoCount: photoIds.length })
     return c.json(
       {
         status: 'processing',
@@ -121,8 +128,8 @@ app.post('/confirm', async (c) => {
       202,
     )
   } catch (err) {
-    log?.error('upload: confirm error', { eventId, error: String(err) })
-    sentry?.captureException(err, { route: 'confirmUpload', eventId })
+    log.error('upload: confirm error', { eventId, error: String(err) })
+    sentry.captureException(err, { route: 'confirmUpload', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })

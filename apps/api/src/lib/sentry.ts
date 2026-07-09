@@ -6,9 +6,11 @@ export function createSentryReporter(dsn: string | undefined) {
     }
   }
 
+  const endpoint = dsn
+
   async function send(body: Record<string, unknown>) {
     try {
-      await fetch(dsn, {
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

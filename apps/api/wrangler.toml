@@ -17,5 +17,8 @@ SENTRY_DSN = ""
 MODAL_TOKEN = ""
 MODAL_WEBHOOK_URL = ""
 
+[triggers]
+crons = ["0 3 * * *"]
+
 [env.dev]
 vars = { LOG_LEVEL = "debug" }

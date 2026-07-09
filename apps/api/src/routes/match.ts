@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
-import type { Env } from '../index'
+import type { AppContext } from '../index'
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<AppContext>()
 
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
-  const sentry = c.get('sentry') as any
+  const log = c.get('logger')
+  const sentry = c.get('sentry')
   if (!eventId) {
     return c.json({ error: 'Event ID required', code: 'VALIDATION_ERROR' }, 400)
   }
@@ -40,17 +40,21 @@ app.post('/', async (c) => {
     })
 
     if (event.rows.length === 0) {
-      log?.warn('match: event not found', { eventId })
+      log.warn('match: event not found', { eventId })
       return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
     }
 
-    if (event.rows[0].passcode !== passcode) {
-      log?.warn('match: invalid passcode', { eventId })
+    const eventRow = event.rows[0] as Record<string, unknown>
+    const storedPasscode = String(eventRow.passcode)
+    const status = String(eventRow.status)
+
+    if (storedPasscode !== passcode) {
+      log.warn('match: invalid passcode', { eventId })
       return c.json({ error: 'Invalid passcode', code: 'UNAUTHORIZED' }, 401)
     }
 
-    if (event.rows[0].status !== 'ready') {
-      log?.info('match: event not ready', { eventId, status: event.rows[0].status })
+    if (status !== 'ready') {
+      log.info('match: event not ready', { eventId, status })
       return c.json({ error: 'Event still processing', code: 'NOT_READY' }, 400)
     }
 
@@ -66,27 +70,30 @@ app.post('/', async (c) => {
     })
 
     const matches = photos.rows
-      .map((photo: any, i: number) => ({
-        photoId: photo.id as string,
-        similarity: Math.max(0.6, 0.9 - i * 0.02),
-        url: photo.r2_key ? `/api/photos/${photo.id}` : '',
-        thumbnailUrl: photo.thumbnail_800_key ? `/api/thumbs/${photo.id}` : '',
-        width: Number(photo.width) || 0,
-        height: Number(photo.height) || 0,
-        faces: [{ bbox: { x: 0, y: 0, width: 100, height: 100 }, isMatch: true }],
-      }))
-      .filter((m: any) => m.similarity >= (threshold as number))
+      .map((row, index) => {
+        const photo = row as Record<string, unknown>
+
+        return {
+          photoId: String(photo.id),
+          similarity: Math.max(0.6, 0.9 - index * 0.02),
+          url: photo.r2_key ? `/api/photos/${photo.id}` : '',
+          thumbnailUrl: photo.thumbnail_800_key ? `/api/thumbs/${photo.id}` : '',
+          width: Number(photo.width) || 0,
+          height: Number(photo.height) || 0,
+          faces: [{ bbox: { x: 0, y: 0, width: 100, height: 100 }, isMatch: true }],
+        }
+      })
+      .filter((match) => match.similarity >= threshold)
 
     matchedCount = matches.length
 
     const processingTime = Date.now() - startTime
-    log?.info('match: completed', { eventId, matchedCount, threshold, processingTime })
+    log.info('match: completed', { eventId, matchedCount, threshold, processingTime })
 
     c.executionCtx.waitUntil(
       (async () => {
         try {
           const sessionId = `ms_${crypto.randomUUID().slice(0, 8)}`
-          const cf = c.req.raw.cf as any
           const userIp = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || ''
           await db.execute({
             sql: `INSERT INTO match_sessions (id, event_id, user_ip, matched_count, similarity_threshold, created_at)
@@ -94,7 +101,7 @@ app.post('/', async (c) => {
             args: [sessionId, eventId, userIp, matchedCount, threshold, Math.floor(Date.now() / 1000)],
           })
         } catch (trackErr) {
-          log?.error('match: failed to track session', { eventId, error: String(trackErr) })
+          log.error('match: failed to track session', { eventId, error: String(trackErr) })
         }
       })(),
     )
@@ -105,8 +112,8 @@ app.post('/', async (c) => {
       processingTime,
     })
   } catch (err) {
-    log?.error('match: error', { eventId, error: String(err) })
-    sentry?.captureException(err, { route: 'match', eventId })
+    log.error('match: error', { eventId, error: String(err) })
+    sentry.captureException(err, { route: 'match', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })

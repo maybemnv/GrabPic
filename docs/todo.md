@@ -167,7 +167,7 @@
 - [x] Consent gate before selfie capture (checkbox, blocks match)
 - [x] Embedding isolation per event (no cross-event sharing)
 - [x] Right to deletion cascade (DELETE /events/:id)
-- [ ] 30-day auto-expiry cron job (scheduled Worker)
+- [x] 30-day auto-expiry cron job (scheduled Worker)
 - [ ] JWT-based organizer auth (future)
 - [ ] Rate limiting on match endpoint
 
@@ -189,3 +189,4 @@
 - [ ] Vercel auto-deploy from GitHub
 - [ ] Modal deploy script
 - [ ] Smoke test after deployment
+

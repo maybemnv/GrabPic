@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { Env } from '../index'
+import type { AppContext } from '../index'
+import { cleanupEventResources } from '../lib/event-cleanup'
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<AppContext>()
 
 const createEventSchema = z.object({
   name: z.string().min(1).max(200),
@@ -25,8 +26,8 @@ function generateId(prefix: string): string {
 }
 
 app.post('/', async (c) => {
-  const log = c.get('logger') as any
-  const sentry = c.get('sentry') as any
+  const log = c.get('logger')
+  const sentry = c.get('sentry')
   try {
     const body = await c.req.json()
     const parsed = createEventSchema.safeParse(body)
@@ -50,7 +51,7 @@ app.post('/', async (c) => {
       args: [eventId, name, passcode, now, now + expiryDays * 86400, organizerEmail, organizerName],
     })
 
-    log?.info('event: created', { eventId, name, organizerEmail })
+    log.info('event: created', { eventId, name, organizerEmail })
 
     return c.json(
       {
@@ -64,15 +65,15 @@ app.post('/', async (c) => {
       201,
     )
   } catch (err) {
-    log?.error('event: create error', { error: String(err) })
-    sentry?.captureException(err, { route: 'createEvent' })
+    log.error('event: create error', { error: String(err) })
+    sentry.captureException(err, { route: 'createEvent' })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
 app.get('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
+  const log = c.get('logger')
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
@@ -85,7 +86,7 @@ app.get('/:eventId', async (c) => {
   })
 
   if (result.rows.length === 0) {
-    log?.warn('event: not found', { eventId })
+    log.warn('event: not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
@@ -94,7 +95,7 @@ app.get('/:eventId', async (c) => {
 
 app.get('/:eventId/status', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
+  const log = c.get('logger')
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
@@ -107,55 +108,59 @@ app.get('/:eventId/status', async (c) => {
   })
 
   if (result.rows.length === 0) {
-    log?.warn('event: status not found', { eventId })
+    log.warn('event: status not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
-  const row = result.rows[0]
+  const row = result.rows[0] as Record<string, unknown>
   const faceCount = Number(row.face_count) || 0
   const photoCount = Number(row.photo_count) || 0
+  const status = String(row.status)
 
   return c.json({
-    status: row.status,
+    status,
     photoCount,
     faceCount,
-    progress: row.status === 'ready' ? 100 : row.status === 'processing' ? 50 : 0,
+    progress: status === 'ready' ? 100 : status === 'processing' ? 50 : 0,
     error: null,
   })
 })
 
 app.delete('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
-  const log = c.get('logger') as any
-  const sentry = c.get('sentry') as any
+  const log = c.get('logger')
+  const sentry = c.get('sentry')
 
   const db = (await import('@libsql/client')).createClient({
     url: c.env.TURSO_URL,
     authToken: c.env.TURSO_TOKEN,
   })
 
-  const result = await db.execute({
-    sql: 'SELECT photo_count FROM events WHERE id = ?',
-    args: [eventId],
+  const result = await cleanupEventResources({
+    db,
+    bucket: c.env.PHOTOS,
+    eventId,
+    log,
+    sentry,
   })
 
-  if (result.rows.length === 0) {
-    log?.warn('event: delete not found', { eventId })
+  if (!result) {
+    log.warn('event: delete not found', { eventId })
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
-  const photosDeleted = Number(result.rows[0].photo_count) || 0
-  const storageFreed = photosDeleted * 5 * 1024 * 1024
+  if (!result.deleted) {
+    return c.json({ error: 'Failed to delete event assets', code: 'ASSET_DELETE_FAILED' }, 500)
+  }
 
-  await db.execute({
-    sql: 'DELETE FROM events WHERE id = ?',
-    args: [eventId],
+  log.info('event: deleted', { eventId, photosDeleted: result.photosDeleted })
+  sentry.captureMessage('Event deleted', { eventId, photosDeleted: result.photosDeleted })
+
+  return c.json({
+    deleted: true,
+    photosDeleted: result.photosDeleted,
+    storageFreed: result.storageFreed,
   })
-
-  log?.info('event: deleted', { eventId, photosDeleted })
-  sentry?.captureMessage('Event deleted', { eventId, photosDeleted })
-
-  return c.json({ deleted: true, photosDeleted, storageFreed })
 })
 
 export { app as events }
