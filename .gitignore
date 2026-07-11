@@ -20,3 +20,4 @@ dist/
 .wrangler/
 # Environment variables (user-provided secrets)
 .env
+apps/api/.wrangler/
