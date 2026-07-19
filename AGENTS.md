@@ -25,7 +25,7 @@ Do not make shared packages depend on `apps/*`.
 TypeScript uses Prettier formatting with 2-space indentation and no semicolons. Follow current naming patterns: React components in `PascalCase.tsx`, utility files in `camelCase.ts` or domain-oriented names, and tests as ordered `NN-description.test.ts`. Keep route handlers thin and place shared types in `packages/types`.
 
 ## Testing Guidelines
-Vitest is configured in [vitest.config.ts](/D:/Projects/GrabPic/vitest.config.ts). Put new tests under `tests/` and name them `*.test.ts`. Some suites hit real infrastructure and may skip when required `.env` values are missing; keep contract-level tests runnable without secrets. Add coverage for API shape changes, latency-sensitive flows, and cleanup paths.
+Vitest is configured in [vitest.config.ts](/D:/Projects/Computer-Vision/GrabPic/vitest.config.ts). Put new tests under `tests/` and name them `*.test.ts`. Some suites hit real infrastructure and may skip when required `.env` values are missing; keep contract-level tests runnable without secrets. Add coverage for API shape changes, latency-sensitive flows, and cleanup paths.
 
 ## Commit & Pull Request Guidelines
 Recent commits use concise conventional prefixes such as `feat(api): ...`, `feat(web): ...`, and `docs: ...`. Keep subjects imperative and scoped when useful. PRs should include a short summary, linked issue or task, notes about env or deployment changes, and screenshots for visible `apps/web` changes.
