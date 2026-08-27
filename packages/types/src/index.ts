@@ -72,6 +72,7 @@ export interface CreateEventRequest {
 export interface CreateEventResponse {
   eventId: string
   passcode: string
+  organizerToken: string
   uploadUrl: string
   shareUrl: string
   qrCode: string

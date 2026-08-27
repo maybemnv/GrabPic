@@ -1,0 +1,29 @@
+const ORGANIZER_TOKEN_BYTES = 32
+
+function toHex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export function generateOrganizerToken(): string {
+  const bytes = new Uint8Array(ORGANIZER_TOKEN_BYTES)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+export async function hashOrganizerToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return toHex(new Uint8Array(digest))
+}
+
+export async function verifyOrganizerToken(
+  authorization: string | undefined,
+  expectedHash: unknown,
+): Promise<boolean> {
+  if (typeof expectedHash !== 'string' || expectedHash.length !== 64) return false
+  if (!authorization?.startsWith('Bearer ')) return false
+  const token = authorization.slice('Bearer '.length)
+  if (!token) return false
+  return (await hashOrganizerToken(token)) === expectedHash
+}

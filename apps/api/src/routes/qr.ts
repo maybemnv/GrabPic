@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../index'
+import { verifyOrganizerToken } from '../lib/organizer-auth'
 
 const app = new Hono<AppContext>()
 
@@ -18,7 +19,7 @@ app.get('/:eventId', async (c) => {
     })
 
     const result = await db.execute({
-      sql: 'SELECT invite_token FROM events WHERE id = ?',
+      sql: 'SELECT invite_token, organizer_token_hash FROM events WHERE id = ?',
       args: [eventId],
     })
 
@@ -27,7 +28,12 @@ app.get('/:eventId', async (c) => {
       return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
     }
 
-    const inviteToken = (result.rows[0] as Record<string, unknown>).invite_token
+    const row = result.rows[0] as Record<string, unknown>
+    if (!(await verifyOrganizerToken(c.req.header('authorization'), row.organizer_token_hash))) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+
+    const inviteToken = row.invite_token
     if (typeof inviteToken !== 'string' || inviteToken.length === 0) {
       return c.json({ error: 'Event invite is unavailable', code: 'INVITE_UNAVAILABLE' }, 503)
     }
