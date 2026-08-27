@@ -83,7 +83,7 @@ grabpic/
 
 ### ML Processing: Modal.com (GPU Serverless)
 - Face detection: MTCNN or RetinaFace
-- Embedding generation: ArcFace (512-dim vectors)
+- Embedding generation: `facenet_pytorch.InceptionResnetV1(pretrained="vggface2")` (512-dim vectors)
 - Clustering: DBSCAN (eps: 0.3–0.5, test empirically per event)
 - **Never run ML inference synchronously in the API layer.** All processing is async — enqueue a job, return immediately, poll for status.
 - Modal functions are defined in `ml/processor.py`. Do not inline ML logic anywhere else.
@@ -114,7 +114,7 @@ Organizer uploads photos
   → API returns signed R2 URLs
   → Client uploads directly to R2 (bypasses Worker)
   → Worker triggers Modal job (async)
-  → Modal: detect faces → generate ArcFace embeddings → DBSCAN cluster → store in Turso
+  → Modal: detect faces → generate FaceNet embeddings → DBSCAN cluster → store in Turso
   → Organizer dashboard polls /events/:id/status
 ```
 
@@ -122,13 +122,13 @@ Organizer uploads photos
 ```
 Attendee takes selfie
   → POST /events/:id/match with selfie image
-  → Worker: generate embedding server-side (ArcFace, same model as processing)
+  → Worker: request a server-side FaceNet embedding from Modal (same model and weights as processing)
   → Cosine similarity search against stored embeddings in Turso
   → Return top-N matching photo IDs
   → Client fetches signed R2 thumbnail URLs for matched photos
 ```
 
-**Critical:** The selfie embedding MUST use the same model weights as the batch processor. Any drift between models breaks matching. Never swap models without re-processing the event.
+**Critical:** The selfie embedding MUST use `InceptionResnetV1(pretrained="vggface2")`, the same model and weights as batch processing. Any drift between models breaks matching. Never swap models without re-processing the event.
 
 ---
 
@@ -183,7 +183,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 ## ML-Specific Guidelines
 
 - DBSCAN `eps` parameter is not a constant — it should be treated as a tunable config per event, stored in the event record.
-- ArcFace produces 512-dim L2-normalized vectors. Cosine similarity = dot product for normalized vectors. Don't add unnecessary normalization steps.
+- InceptionResnetV1 with `vggface2` produces 512-dim face embeddings. The processor and selfie endpoint L2-normalize them; cosine similarity is then the dot product. Do not change model weights without re-processing the event.
 - Face detection confidence threshold: 0.9 minimum. Discard low-confidence detections rather than embedding them — they corrupt clusters.
 - If DBSCAN produces >500 clusters for an event, surface a warning to the organizer. It likely means bad lighting / very large event — not a bug.
 - Model weights are pinned in `ml/requirements.txt`. Never float to `latest`.

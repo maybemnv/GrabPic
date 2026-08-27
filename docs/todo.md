@@ -51,6 +51,8 @@
 
 ### Routes
 - [x] POST /events — create event (Zod validated)
+- [x] POST /events/lookup — resolve a manual passcode without exposing event IDs in the UI
+- [x] GET /events/invite/:inviteToken — resolve opaque attendee invite links
 - [x] GET /events/:id — get event
 - [x] GET /events/:id/status — processing status
 - [x] DELETE /events/:id — delete event + cascade
@@ -62,8 +64,8 @@
 - [x] Hono.js app with CORS + logger middleware
 - [x] Env interface (PHOTOS R2 bucket, TURSO, MODAL, LOG_LEVEL)
 - [x] wrangler.toml with R2 binding
-- [ ] wrangler.toml — fill in actual D1 database_id
-- [ ] wrangler.toml — fill in MODAL_TOKEN and MODAL_WEBHOOK_URL
+- [x] wrangler.toml — remove unused D1 binding
+- [ ] Configure MODAL_TOKEN, MODAL_WEBHOOK_URL, MODAL_EMBEDDING_URL, and R2 signing secrets
 
 ## Frontend (apps/web)
 
@@ -77,7 +79,7 @@
 
 ### Attendee Portal (`/attendee`)
 - [x] Dark theme matching landing page
-- [x] Event code + ID entry → `GET /events/:id` validation
+- [x] Manual event code lookup; opaque invite links resolve event context without event ID entry
 - [x] Camera access via MediaDevices API (WebRTC)
 - [x] Selfie capture with canvas preview + retake
 - [x] Consent checkbox (BIPA/GDPR) — blocks match without it
@@ -99,7 +101,7 @@
 
 - [x] Modal stub definition (grabpic-processor)
 - [x] MTCNN face detection (GPU)
-- [x] FaceNet/ArcFace 512-dim embedding generation
+- [x] FaceNet `InceptionResnetV1(pretrained="vggface2")` 512-dim embedding generation
 - [x] DBSCAN clustering (eps=0.4, min_samples=2)
 - [x] Turso storage (faces + embeddings)
 - [x] Event status update after processing
@@ -123,7 +125,7 @@
 
 ### Cloudflare Workers
 - [ ] Deploy API (`wrangler deploy`)
-- [ ] Configure wrangler.toml vars (MODAL_TOKEN, MODAL_WEBHOOK_URL)
+- [ ] Configure Worker vars/secrets (Modal URLs/token, R2 endpoint/bucket/signing keys)
 - [ ] Set up custom domain (api.grabpic.app)
 - [ ] Configure 30-day expiry cron job
 
@@ -168,8 +170,8 @@
 - [x] Embedding isolation per event (no cross-event sharing)
 - [x] Right to deletion cascade (DELETE /events/:id)
 - [x] 30-day auto-expiry cron job (scheduled Worker)
-- [ ] JWT-based organizer auth (future)
-- [ ] Rate limiting on match endpoint
+- [ ] Organizer authentication before open public multi-tenant launch
+- [x] Cloudflare Rate Limiting on event creation, lookup, upload, and match endpoints
 
 ## Documentation
 
