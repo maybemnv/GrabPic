@@ -36,7 +36,7 @@ Create new event
   "eventId": "evt_1a2b3c4d",
   "passcode": "123456",
   "uploadUrl": "https://api.GrabPic.app/events/evt_1a2b3c4d/upload",
-  "shareUrl": "https://GrabPic.app/e/123456",
+  "shareUrl": "https://GrabPic.app/e/0123456789abcdef0123456789abcdef",
   "qrCode": "https://api.GrabPic.app/qr/evt_1a2b3c4d",
   "expiresAt": 1741824000
 }
@@ -151,8 +151,7 @@ Match selfie to event photos
 ```json
 {
   "passcode": "123456",
-  "selfieData": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",  // Base64
-  "threshold": 0.6  // Optional, default 0.6
+  "selfieData": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."  // Base64
 }
 ```
 
@@ -163,8 +162,8 @@ Match selfie to event photos
     {
       "photoId": "photo_abc123",
       "similarity": 0.87,
-      "url": "https://cdn.GrabPic.app/evt_123/photo_abc123_800.jpg",
-      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_abc123_200.jpg",
+       "url": "<short-lived-presigned-original-url>",
+       "thumbnailUrl": "<short-lived-presigned-800px-url>",
       "width": 4032,
       "height": 3024,
       "faces": [
@@ -177,8 +176,8 @@ Match selfie to event photos
     {
       "photoId": "photo_def456",
       "similarity": 0.73,
-      "url": "https://cdn.GrabPic.app/evt_123/photo_def456_800.jpg",
-      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_def456_200.jpg",
+       "url": "<short-lived-presigned-original-url>",
+       "thumbnailUrl": "<short-lived-presigned-800px-url>",
       "width": 3024,
       "height": 4032,
       "faces": [

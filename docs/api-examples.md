@@ -20,7 +20,7 @@ Response:
   "eventId": "evt_a1b2c3d4",
   "passcode": "837291",
   "uploadUrl": "/events/evt_a1b2c3d4/upload",
-  "shareUrl": "https://grabpic.app/e/837291",
+  "shareUrl": "https://grabpic.app/e/0123456789abcdef0123456789abcdef",
   "qrCode": "https://api.grabpic.app/qr/evt_a1b2c3d4",
   "expiresAt": 1778457600
 }
@@ -106,8 +106,7 @@ curl -X POST https://api.grabpic.app/events/evt_a1b2c3d4/match \
   -H "Content-Type: application/json" \
   -d '{
     "passcode": "837291",
-    "selfieData": "data:image/jpeg;base64,/9j/4AAQ...",
-    "threshold": 0.6
+    "selfieData": "data:image/jpeg;base64,/9j/4AAQ..."
   }'
 ```
 
@@ -115,7 +114,7 @@ Response:
 ```json
 {
   "matches": [
-    {"photoId": "photo_uuid1", "similarity": 0.87, "url": "/api/photos/photo_uuid1", "thumbnailUrl": "/api/thumbs/photo_uuid1", "width": 1920, "height": 1080, "faces": [{"bbox": {"x": 100, "y": 200, "width": 80, "height": 80}, "isMatch": true}]}
+    {"photoId": "photo_uuid1", "similarity": 0.87, "url": "<short-lived-presigned-original-url>", "thumbnailUrl": "<short-lived-presigned-800px-url>", "width": 1920, "height": 1080, "faces": [{"bbox": {"x": 100, "y": 200, "width": 80, "height": 80}, "isMatch": true}]}
   ],
   "totalMatches": 5,
   "processingTime": 234
