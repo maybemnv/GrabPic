@@ -78,9 +78,9 @@ def thumbnail_keys(event_id: str, photo_id: str) -> Tuple[str, str]:
 
 
 def database():
-    from libsql_client import create_client
+    from libsql_client import create_client_sync
 
-    return create_client(
+    return create_client_sync(
         url=os.environ["TURSO_URL"],
         auth_token=os.environ["TURSO_TOKEN"],
     )

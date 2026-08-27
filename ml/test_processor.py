@@ -28,8 +28,11 @@ class _FakeModal:
 
 
 sys.modules.setdefault("modal", _FakeModal())
+_fake_libsql = types.ModuleType("libsql_client")
+_fake_libsql.create_client_sync = lambda **kwargs: ("sync-client", kwargs)
+sys.modules.setdefault("libsql_client", _fake_libsql)
 sys.path.insert(0, "ml")
-from processor import normalize_embedding, parse_processing_request, thumbnail_keys
+from processor import database, normalize_embedding, parse_processing_request, thumbnail_keys
 
 
 class ProcessorContractTests(unittest.TestCase):
@@ -56,6 +59,15 @@ class ProcessorContractTests(unittest.TestCase):
         normalized = normalize_embedding([3.0, 4.0])
         self.assertAlmostEqual(float(normalized[0]), 0.6)
         self.assertAlmostEqual(float(normalized[1]), 0.8)
+
+    def test_database_uses_synchronous_client_for_sync_handlers(self):
+        import os
+
+        os.environ["TURSO_URL"] = "libsql://example.test"
+        os.environ["TURSO_TOKEN"] = "token"
+        client, config = database()
+        self.assertEqual(client, "sync-client")
+        self.assertEqual(config, {"url": "libsql://example.test", "auth_token": "token"})
 
 
 if __name__ == "__main__":
