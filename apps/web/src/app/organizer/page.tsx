@@ -43,11 +43,15 @@ export default function OrganizerPage() {
     setError('')
     try {
       setUploadStatus('Requesting upload URLs...')
-      const { uploadUrls } = await getUploadUrls(event.eventId, photos.map((f) => ({
-        filename: f.name,
-        size: f.size,
-        type: f.type,
-      })))
+      const { uploadUrls } = await getUploadUrls(
+        event.eventId,
+        event.organizerToken,
+        photos.map((f) => ({
+          filename: f.name,
+          size: f.size,
+          type: f.type,
+        })),
+      )
 
       setUploadStatus('Uploading photos...')
       await Promise.all(
@@ -63,18 +67,23 @@ export default function OrganizerPage() {
       setUploadStatus('Confirming upload...')
       const confirm = await confirmUpload(
         event.eventId,
+        event.organizerToken,
         uploadUrls.map((u) => u.photoId),
       )
-      setUploadStatus(`Processing started. ${confirm.estimatedTime ? `Est. ${confirm.estimatedTime}s` : ''}`)
+      setUploadStatus(
+        `Processing started. ${confirm.estimatedTime ? `Est. ${confirm.estimatedTime}s` : ''}`,
+      )
 
       const interval = setInterval(async () => {
         try {
-          const status = await getEventStatus(event.eventId)
+          const status = await getEventStatus(event.eventId, event.organizerToken)
           setProcessingStatus(status.status)
           if (status.status === 'ready' || status.status === 'failed') {
             clearInterval(interval)
           }
-        } catch { /* continue polling */ }
+        } catch {
+          /* continue polling */
+        }
       }, 5000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -93,11 +102,18 @@ export default function OrganizerPage() {
   return (
     <main className="min-h-screen bg-black">
       <div className="mx-auto max-w-2xl px-4 py-16 md:py-24">
-        <a href="/" className="inline-block text-xs sm:text-sm mb-8 transition-colors" style={{ color: 'rgba(225, 224, 204, 0.6)' }}>
+        <a
+          href="/"
+          className="inline-block text-xs sm:text-sm mb-8 transition-colors"
+          style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+        >
           &larr; Back to home
         </a>
 
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-medium mb-8" style={{ color: '#E1E0CC' }}>
+        <h1
+          className="text-2xl sm:text-3xl md:text-4xl font-medium mb-8"
+          style={{ color: '#E1E0CC' }}
+        >
           Organizer Dashboard
         </h1>
 
@@ -110,7 +126,10 @@ export default function OrganizerPage() {
         {!event ? (
           <form onSubmit={handleCreateEvent} className="space-y-4">
             <div>
-              <label className="block text-xs sm:text-sm mb-1.5" style={{ color: 'rgba(225, 224, 204, 0.7)' }}>
+              <label
+                className="block text-xs sm:text-sm mb-1.5"
+                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
+              >
                 Event Name
               </label>
               <input
@@ -123,7 +142,10 @@ export default function OrganizerPage() {
               />
             </div>
             <div>
-              <label className="block text-xs sm:text-sm mb-1.5" style={{ color: 'rgba(225, 224, 204, 0.7)' }}>
+              <label
+                className="block text-xs sm:text-sm mb-1.5"
+                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
+              >
                 Your Email
               </label>
               <input
@@ -137,7 +159,10 @@ export default function OrganizerPage() {
               />
             </div>
             <div>
-              <label className="block text-xs sm:text-sm mb-1.5" style={{ color: 'rgba(225, 224, 204, 0.7)' }}>
+              <label
+                className="block text-xs sm:text-sm mb-1.5"
+                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
+              >
                 Your Name
               </label>
               <input
@@ -167,21 +192,37 @@ export default function OrganizerPage() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3">
-                  <span className="text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.6)' }}>
+                  <span
+                    className="text-xs sm:text-sm"
+                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+                  >
                     Passcode
                   </span>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-base sm:text-lg tracking-widest font-bold" style={{ color: '#E1E0CC' }}>
+                    <span
+                      className="font-mono text-base sm:text-lg tracking-widest font-bold"
+                      style={{ color: '#E1E0CC' }}
+                    >
                       {event.passcode}
                     </span>
-                    <button onClick={copyPasscode} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-                      {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" style={{ color: 'rgba(225, 224, 204, 0.6)' }} />}
+                    <button
+                      onClick={copyPasscode}
+                      className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                    >
+                      {copied ? (
+                        <Check className="w-4 h-4 text-green-400" />
+                      ) : (
+                        <Copy className="w-4 h-4" style={{ color: 'rgba(225, 224, 204, 0.6)' }} />
+                      )}
                     </button>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3">
-                  <span className="text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.6)' }}>
+                  <span
+                    className="text-xs sm:text-sm"
+                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+                  >
                     Share Link
                   </span>
                   <a
@@ -195,6 +236,16 @@ export default function OrganizerPage() {
                     Open
                   </a>
                 </div>
+
+                <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
+                  <p className="text-xs" style={{ color: 'rgba(225, 224, 204, 0.7)' }}>
+                    Save this organizer token. It is shown only when the event is created and
+                    protects future management requests.
+                  </p>
+                  <code className="mt-2 block break-all text-[11px]" style={{ color: '#DEDBC8' }}>
+                    {event.organizerToken}
+                  </code>
+                </div>
               </div>
             </div>
 
@@ -206,7 +257,9 @@ export default function OrganizerPage() {
               <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/10 bg-white/5 px-6 py-8 cursor-pointer hover:border-primary/30 transition-colors">
                 <Upload className="w-6 h-6 mb-2" style={{ color: 'rgba(225, 224, 204, 0.5)' }} />
                 <span className="text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.5)' }}>
-                  {photos.length > 0 ? `${photos.length} photos selected` : 'Click to select photos'}
+                  {photos.length > 0
+                    ? `${photos.length} photos selected`
+                    : 'Click to select photos'}
                 </span>
                 <input
                   type="file"
@@ -225,24 +278,40 @@ export default function OrganizerPage() {
                   style={{ backgroundColor: '#DEDBC8', color: '#000' }}
                 >
                   {uploading ? (
-                    <><Loader className="w-4 h-4 animate-spin" /> {uploadStatus}</>
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" /> {uploadStatus}
+                    </>
                   ) : (
-                    <><Upload className="w-4 h-4" /> Upload & Process</>
+                    <>
+                      <Upload className="w-4 h-4" /> Upload & Process
+                    </>
                   )}
                 </button>
               )}
 
               {uploadStatus && !uploading && (
-                <p className="mt-3 text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.6)' }}>
+                <p
+                  className="mt-3 text-xs sm:text-sm"
+                  style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+                >
                   {uploadStatus}
                 </p>
               )}
 
               {processingStatus && (
                 <div className="mt-3 flex items-center gap-2">
-                  <span className={`inline-block w-2 h-2 rounded-full ${processingStatus === 'ready' ? 'bg-green-400' : processingStatus === 'failed' ? 'bg-red-400' : 'bg-yellow-400 animate-pulse'}`} />
-                  <span className="text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.6)' }}>
-                    {processingStatus === 'ready' ? 'Processing complete' : processingStatus === 'failed' ? 'Processing failed' : 'Processing...'}
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full ${processingStatus === 'ready' ? 'bg-green-400' : processingStatus === 'failed' ? 'bg-red-400' : 'bg-yellow-400 animate-pulse'}`}
+                  />
+                  <span
+                    className="text-xs sm:text-sm"
+                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+                  >
+                    {processingStatus === 'ready'
+                      ? 'Processing complete'
+                      : processingStatus === 'failed'
+                        ? 'Processing failed'
+                        : 'Processing...'}
                   </span>
                 </div>
               )}

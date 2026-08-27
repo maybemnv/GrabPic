@@ -61,7 +61,7 @@ GrabPic/
 | Database | Turso (libSQL with vector search) |
 | Storage | Cloudflare R2 |
 | ML Processing | Modal.com (GPU serverless) |
-| Face Recognition | FaceNet / ArcFace (512-dim embeddings) |
+| Face Recognition | FaceNet `InceptionResnetV1(vggface2)` (512-dim embeddings) |
 | Clustering | DBSCAN |
 | Monorepo | pnpm workspaces + Turborepo |
 
@@ -90,12 +90,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     Attendee->>API: POST /match with selfie
-    API->>API: Generate embedding
+    API->>Modal: Generate selfie embedding
     API->>DB: Cosine similarity search
     DB->>API: Top-N matching photos
-    API->>R2: Generate signed URLs
+    API->>R2: Generate short-lived presigned URLs
     API->>Attendee: Return matched gallery
 ```
+
+Organizer management routes require the one-time high-entropy bearer token returned by `POST /events`. Only its SHA-256 hash is stored. Upload confirmation accepts one processing batch per event, so later confirmations are rejected.
 
 ## Getting Started
 
@@ -130,6 +132,7 @@ pnpm vitest run
 ```
 
 Tests gracefully skip when env vars are missing, so they always pass on CI without secrets. Contract tests (type validation) run regardless.
+
 
 ## Lint
 

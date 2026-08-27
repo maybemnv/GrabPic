@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Date:** February 9, 2026
 **Owner:** Product Engineering
-**Status:** Planning Phase
+**Status:** Implemented contract (controlled/private pilot)
 
 ---
 
@@ -12,8 +12,8 @@
 - Development: `http://localhost:8787`
 
 ## Authentication
-- Organizer: JWT token (email-based login)
-- Attendee: Event passcode (no account required)
+- Organizer: one-time high-entropy bearer token returned by event creation; only its SHA-256 hash is stored. Send `Authorization: Bearer <organizerToken>` for event detail, status, upload, confirmation, delete, and QR routes.
+- Attendee: event passcode or opaque invite token (no account required)
 
 ---
 
@@ -35,8 +35,9 @@ Create new event
 {
   "eventId": "evt_1a2b3c4d",
   "passcode": "123456",
+  "organizerToken": "<one-time bearer token; save it securely>",
   "uploadUrl": "https://api.GrabPic.app/events/evt_1a2b3c4d/upload",
-  "shareUrl": "https://GrabPic.app/e/123456",
+  "shareUrl": "https://GrabPic.app/e/0123456789abcdef0123456789abcdef",
   "qrCode": "https://api.GrabPic.app/qr/evt_1a2b3c4d",
   "expiresAt": 1741824000
 }
@@ -46,6 +47,8 @@ Create new event
 
 ### **POST /events/:eventId/upload**
 Get signed URLs for photo upload
+
+**Headers:** `Authorization: Bearer <organizerToken>`
 
 **Request:**
 ```json
@@ -106,6 +109,10 @@ await fetch('/events/evt_123/upload/confirm', {
 ### **POST /events/:eventId/upload/confirm**
 Trigger processing after upload complete
 
+**Headers:** `Authorization: Bearer <organizerToken>`
+
+Only the first successful confirmation claims the event processing batch in Phase 1. Later confirmations are rejected.
+
 **Request:**
 ```json
 {
@@ -131,6 +138,8 @@ Trigger processing after upload complete
 ### **GET /events/:eventId/status**
 Check processing status
 
+**Headers:** `Authorization: Bearer <organizerToken>`
+
 **Response:**
 ```json
 {
@@ -151,8 +160,7 @@ Match selfie to event photos
 ```json
 {
   "passcode": "123456",
-  "selfieData": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",  // Base64
-  "threshold": 0.6  // Optional, default 0.6
+  "selfieData": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."  // Base64
 }
 ```
 
@@ -163,8 +171,8 @@ Match selfie to event photos
     {
       "photoId": "photo_abc123",
       "similarity": 0.87,
-      "url": "https://cdn.GrabPic.app/evt_123/photo_abc123_800.jpg",
-      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_abc123_200.jpg",
+       "url": "<short-lived-presigned-original-url>",
+       "thumbnailUrl": "<short-lived-presigned-800px-url>",
       "width": 4032,
       "height": 3024,
       "faces": [
@@ -177,8 +185,8 @@ Match selfie to event photos
     {
       "photoId": "photo_def456",
       "similarity": 0.73,
-      "url": "https://cdn.GrabPic.app/evt_123/photo_def456_800.jpg",
-      "thumbnailUrl": "https://cdn.GrabPic.app/evt_123/photo_def456_200.jpg",
+       "url": "<short-lived-presigned-original-url>",
+       "thumbnailUrl": "<short-lived-presigned-800px-url>",
       "width": 3024,
       "height": 4032,
       "faces": [
@@ -261,7 +269,7 @@ Delete event and all photos (organizer only)
 
 **Headers:**
 ```
-Authorization: Bearer <jwt_token>
+Authorization: Bearer <organizerToken>
 ```
 
 **Response:**

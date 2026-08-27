@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Date:** February 9, 2026
 **Owner:** Product Engineering
-**Status:** Planning Phase
+**Status:** Implemented in `ml/processor.py`; this document records the deployed contract.
 
 ---
 
@@ -16,7 +16,7 @@ from typing import List, Dict
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-stub = modal.Stub(
+app = modal.App(
     "GrabPic-processor",
     secrets=[modal.Secret.from_name("turso-credentials")]
 )
@@ -44,7 +44,7 @@ image = (
     timeout=600,  # 10 minutes max
     memory=4096   # 4GB RAM
 )
-def process_event(event_id: str, photo_urls: List[str]) -> Dict:
+def process_event(payload: Dict[str, Any]) -> Dict:
     """
     Main processing function for an event
     Returns: {
@@ -57,15 +57,15 @@ def process_event(event_id: str, photo_urls: List[str]) -> Dict:
     start = time.time()
 
     # Initialize models (cached after first cold start)
-    mtcnn = MTCNN(keep_all=True, device='cuda', post_process=False)
+    mtcnn = MTCNN(keep_all=True, device='cuda', post_process=True)
     resnet = InceptionResnetV1(pretrained='vggface2').eval().to('cuda')
 
     all_faces = []
 
     # Process each photo
-    for photo_url in photo_urls:
-        photo_id = extract_photo_id(photo_url)
-        img = download_and_preprocess(photo_url)
+    for photo in payload['photos']:
+        photo_id = photo['photo_id']
+        img = download_from_r2(photo['r2_key'])
 
         # Detect faces
         boxes, probs, landmarks = mtcnn.detect(img, landmarks=True)
@@ -171,12 +171,7 @@ def store_faces_in_db(event_id: str, faces: List[Dict]):
 ```typescript
 // /api/webhooks/process-event.ts
 export async function onUploadComplete(req: Request) {
-  const { eventId, photoIds } = await req.json()
-
-  // Get photo URLs from R2
-  const photoUrls = photoIds.map(id =>
-    `https://r2.GrabPic.app/events/${eventId}/${id}.jpg`
-  )
+  const { event_id, photos } = await req.json()
 
   // Trigger Modal function
   const modalUrl = "https://modal.com/GrabPic-processor/process-event"
@@ -186,8 +181,8 @@ export async function onUploadComplete(req: Request) {
       'Authorization': `Bearer ${env.MODAL_TOKEN}`
     },
     body: JSON.stringify({
-      event_id: eventId,
-      photo_urls: photoUrls
+      event_id,
+      photos
     })
   })
 

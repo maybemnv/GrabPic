@@ -12,7 +12,7 @@
 - [x] Organizer dashboard (create event, upload, poll status)
 - [x] Attendee portal (code entry, selfie capture, gallery)
 - [x] Edge API (Cloudflare Workers + Hono, all routes)
-- [x] ML pipeline (Modal: MTCNN + ArcFace + DBSCAN)
+- [x] ML pipeline (Modal: MTCNN + FaceNet vggface2 + DBSCAN)
 - [x] Test suite (7 test files, real infra)
 - [x] Monitoring (Sentry, PostHog, structured logging)
 - [x] Error boundary pages (404, error, global-error)

@@ -285,7 +285,7 @@ function FeaturesSection() {
       icon: 'https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260405_171741_ed9845ab-f5b2-4018-8ce7-07cc01823522.png&w=1280&q=85',
       items: [
         'Face detection via MTCNN on GPU',
-        'ArcFace 512-dim embedding generation',
+        'FaceNet vggface2 512-dim embedding generation',
         'DBSCAN clustering for face grouping',
       ],
     },

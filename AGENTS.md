@@ -83,7 +83,7 @@ grabpic/
 
 ### ML Processing: Modal.com (GPU Serverless)
 - Face detection: MTCNN or RetinaFace
-- Embedding generation: ArcFace (512-dim vectors)
+- Embedding generation: `facenet_pytorch.InceptionResnetV1(pretrained="vggface2")` (512-dim vectors)
 - Clustering: DBSCAN (eps: 0.3–0.5, test empirically per event)
 - **Never run ML inference synchronously in the API layer.** All processing is async — enqueue a job, return immediately, poll for status.
 - Modal functions are defined in `ml/processor.py`. Do not inline ML logic anywhere else.
@@ -93,6 +93,7 @@ grabpic/
 - Thumbnails → R2 (`thumbs/200/`, `thumbs/800/`)
 - Signed URLs for all uploads. Never expose raw R2 bucket URLs to clients.
 - Thumbnail sizes: 200px (grid view), 800px (preview). 1600px added in Phase 2.
+- Upload initiation and confirmation are organizer-token protected; signed PUTs include the declared content length and confirmation verifies the stored R2 object size.
 
 ### Database: Turso (libSQL / SQLite at edge)
 - Schema lives in `packages/db/schema.ts`
@@ -114,7 +115,7 @@ Organizer uploads photos
   → API returns signed R2 URLs
   → Client uploads directly to R2 (bypasses Worker)
   → Worker triggers Modal job (async)
-  → Modal: detect faces → generate ArcFace embeddings → DBSCAN cluster → store in Turso
+  → Modal: detect faces → generate FaceNet embeddings → DBSCAN cluster → store in Turso
   → Organizer dashboard polls /events/:id/status
 ```
 
@@ -122,13 +123,13 @@ Organizer uploads photos
 ```
 Attendee takes selfie
   → POST /events/:id/match with selfie image
-  → Worker: generate embedding server-side (ArcFace, same model as processing)
+  → Worker: request a server-side FaceNet embedding from Modal (same model and weights as processing)
   → Cosine similarity search against stored embeddings in Turso
   → Return top-N matching photo IDs
   → Client fetches signed R2 thumbnail URLs for matched photos
 ```
 
-**Critical:** The selfie embedding MUST use the same model weights as the batch processor. Any drift between models breaks matching. Never swap models without re-processing the event.
+**Critical:** The selfie embedding MUST use `InceptionResnetV1(pretrained="vggface2")`, the same model and weights as batch processing. Any drift between models breaks matching. Never swap models without re-processing the event.
 
 ---
 
@@ -142,6 +143,7 @@ Attendee takes selfie
 - Add a comment explaining *why* for any non-obvious decision (clustering params, threshold values, etc.)
 - When adding a new route, also add the corresponding TypeScript type in `packages/types`
 - Prefer `fetch`-based polling over websockets for job status (MVP scope)
+- Treat the organizer management token as a one-time bearer credential: return it only at event creation, store only its hash, and never log it.
 
 ### DON'T
 - Don't run DBSCAN or any ML inference synchronously inside a Worker handler
@@ -151,6 +153,7 @@ Attendee takes selfie
 - Don't expose event codes in URLs — codes are entered via form, never as query params
 - Don't add watermarks in Phase 1 — free tier is limited by photo count (100), not watermarks
 - Don't use `console.log` in production Workers — use structured logging with `c.env.LOG_LEVEL`
+- Don't expose full event details, status, upload, delete, or QR management routes without the organizer management token.
 
 ---
 
@@ -162,6 +165,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - **Auto-expiry:** All event data (photos, embeddings, clusters) auto-deletes 30 days post-event. This is enforced by a scheduled Cloudflare Worker cron job, not a manual process.
 - **Embedding isolation:** Face embeddings are scoped to an event. Never share or cross-reference embeddings across events.
 - **No third-party embedding sharing:** Embeddings are never sent to any external analytics, logging, or data pipeline. Strip them from all logs.
+- **Public/organizer boundary:** Attendee lookup and invite endpoints return sanitized public context only. Full event details and management actions require the organizer management token.
 - **Right to deletion:** `DELETE /events/:id` must cascade-delete R2 objects, Turso rows, and any queued Modal jobs for that event.
 
 ---
@@ -183,7 +187,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 ## ML-Specific Guidelines
 
 - DBSCAN `eps` parameter is not a constant — it should be treated as a tunable config per event, stored in the event record.
-- ArcFace produces 512-dim L2-normalized vectors. Cosine similarity = dot product for normalized vectors. Don't add unnecessary normalization steps.
+- InceptionResnetV1 with `vggface2` produces 512-dim face embeddings. The processor and selfie endpoint L2-normalize them; cosine similarity is then the dot product. Do not change model weights without re-processing the event.
 - Face detection confidence threshold: 0.9 minimum. Discard low-confidence detections rather than embedding them — they corrupt clusters.
 - If DBSCAN produces >500 clusters for an event, surface a warning to the organizer. It likely means bad lighting / very large event — not a bug.
 - Model weights are pinned in `ml/requirements.txt`. Never float to `latest`.
@@ -198,6 +202,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - Selfie-based matching
 - 200px + 800px thumbnails
 - 6-digit event code + QR code
+- One processing submission per event in Phase 1; later uploads require a separate event.
 - 30-day auto-expiry
 - Free tier: 100 photos max
 

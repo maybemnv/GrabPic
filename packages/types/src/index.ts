@@ -13,6 +13,12 @@ export interface Event {
   tier: 'free' | 'pro'
 }
 
+export interface EventAccessResponse {
+  eventId: string
+  name: string
+  status: Event['status']
+}
+
 export interface Photo {
   id: string
   eventId: string
@@ -66,6 +72,7 @@ export interface CreateEventRequest {
 export interface CreateEventResponse {
   eventId: string
   passcode: string
+  organizerToken: string
   uploadUrl: string
   shareUrl: string
   qrCode: string
@@ -93,9 +100,9 @@ export interface EventStatusResponse {
 }
 
 export interface MatchRequest {
-  passcode: string
+  passcode?: string
+  inviteToken?: string
   selfieData: string
-  threshold?: number
 }
 
 export interface MatchResponse {

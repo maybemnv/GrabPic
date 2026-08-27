@@ -12,6 +12,7 @@ import type {
   EventStatusResponse,
   DeleteEventResponse,
   ApiError,
+  EventAccessResponse,
 } from '@grabpic/types'
 
 describe('API Contract Validation (Type Shapes)', () => {
@@ -26,8 +27,9 @@ describe('API Contract Validation (Type Shapes)', () => {
     const validResponse: CreateEventResponse = {
       eventId: 'evt_1a2b3c4d',
       passcode: '123456',
+      organizerToken: 'a'.repeat(43),
       uploadUrl: '/events/evt_1a2b3c4d/upload',
-      shareUrl: 'https://grabpic.app/e/123456',
+      shareUrl: 'https://grabpic.app/e/0123456789abcdef0123456789abcdef',
       qrCode: 'https://api.grabpic.app/qr/evt_1a2b3c4d',
       expiresAt: 1741824000,
     }
@@ -41,9 +43,21 @@ describe('API Contract Validation (Type Shapes)', () => {
     it('validates response has all fields', () => {
       expect(validResponse.eventId).toMatch(/^evt_/)
       expect(validResponse.passcode).toMatch(/^\d{6}$/)
+      expect(validResponse.organizerToken).toHaveLength(43)
       expect(validResponse.uploadUrl).toContain('/upload')
       expect(validResponse.shareUrl).toContain('grabpic.app')
       expect(validResponse.expiresAt).toBeGreaterThan(0)
+      expect(validResponse.shareUrl).toMatch(/\/e\/[a-f0-9]{32}$/)
+    })
+
+    it('uses an opaque event lookup response for attendee links', () => {
+      const access: EventAccessResponse = {
+        eventId: 'evt_1a2b3c4d',
+        name: 'Event',
+        status: 'ready',
+      }
+      expect(access.eventId).toMatch(/^evt_/)
+      expect(access.name).toBeTruthy()
     })
   })
 
@@ -92,7 +106,6 @@ describe('API Contract Validation (Type Shapes)', () => {
     const validRequest: MatchRequest = {
       passcode: '123456',
       selfieData: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',
-      threshold: 0.6,
     }
 
     const validResponse: MatchResponse = {
@@ -114,8 +127,6 @@ describe('API Contract Validation (Type Shapes)', () => {
     it('validates match request body', () => {
       expect(validRequest.passcode).toMatch(/^\d{6}$/)
       expect(validRequest.selfieData).toContain('base64')
-      expect(validRequest.threshold).toBeGreaterThanOrEqual(0)
-      expect(validRequest.threshold).toBeLessThanOrEqual(1)
     })
 
     it('validates match response structure', () => {
