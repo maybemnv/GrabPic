@@ -7,7 +7,7 @@
 ## Technical
 
 1. **Client-side vs. server-side embedding for selfies?**
-   - **Resolution:** Server-side (ArcFace via Modal webhook). Client ONNX deferred to Phase 2.
+   - **Resolution:** Server-side (`InceptionResnetV1(pretrained="vggface2")` via Modal). Client ONNX deferred to Phase 2.
 
 2. **Clustering algorithm parameters?**
    - **Resolution:** DBSCAN eps=0.4 (default), min_samples=2. Stored as tunable per-event config.

@@ -10,10 +10,17 @@ import { cleanupExpiredEvents } from './lib/event-cleanup'
 
 export interface Env {
   PHOTOS: R2Bucket
+  R2_ENDPOINT: string
+  R2_BUCKET: string
+  R2_ACCESS_KEY_ID: string
+  R2_SECRET_ACCESS_KEY: string
+  RATE_LIMITER: RateLimit
   LOG_LEVEL: string
   SENTRY_DSN: string
   MODAL_TOKEN: string
   MODAL_WEBHOOK_URL: string
+  MODAL_EMBEDDING_URL: string
+  MATCH_THRESHOLD: string
   TURSO_URL: string
   TURSO_TOKEN: string
 }
