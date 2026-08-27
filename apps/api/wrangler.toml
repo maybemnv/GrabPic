@@ -6,16 +6,23 @@ compatibility_date = "2025-01-01"
 binding = "PHOTOS"
 bucket_name = "grabpic-photos"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "grabpic"
-database_id = ""
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 120
+  period = 60
 
 [vars]
 LOG_LEVEL = "info"
 SENTRY_DSN = ""
 MODAL_TOKEN = ""
 MODAL_WEBHOOK_URL = ""
+MODAL_EMBEDDING_URL = ""
+MATCH_THRESHOLD = "0.6"
+R2_BUCKET = "grabpic-photos"
+R2_ENDPOINT = ""
 
 [triggers]
 crons = ["0 3 * * *"]
