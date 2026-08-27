@@ -93,6 +93,7 @@ grabpic/
 - Thumbnails → R2 (`thumbs/200/`, `thumbs/800/`)
 - Signed URLs for all uploads. Never expose raw R2 bucket URLs to clients.
 - Thumbnail sizes: 200px (grid view), 800px (preview). 1600px added in Phase 2.
+- Upload initiation and confirmation are organizer-token protected; signed PUTs include the declared content length and confirmation verifies the stored R2 object size.
 
 ### Database: Turso (libSQL / SQLite at edge)
 - Schema lives in `packages/db/schema.ts`
@@ -142,6 +143,7 @@ Attendee takes selfie
 - Add a comment explaining *why* for any non-obvious decision (clustering params, threshold values, etc.)
 - When adding a new route, also add the corresponding TypeScript type in `packages/types`
 - Prefer `fetch`-based polling over websockets for job status (MVP scope)
+- Treat the organizer management token as a one-time bearer credential: return it only at event creation, store only its hash, and never log it.
 
 ### DON'T
 - Don't run DBSCAN or any ML inference synchronously inside a Worker handler
@@ -151,6 +153,7 @@ Attendee takes selfie
 - Don't expose event codes in URLs — codes are entered via form, never as query params
 - Don't add watermarks in Phase 1 — free tier is limited by photo count (100), not watermarks
 - Don't use `console.log` in production Workers — use structured logging with `c.env.LOG_LEVEL`
+- Don't expose full event details, status, upload, delete, or QR management routes without the organizer management token.
 
 ---
 
@@ -162,6 +165,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - **Auto-expiry:** All event data (photos, embeddings, clusters) auto-deletes 30 days post-event. This is enforced by a scheduled Cloudflare Worker cron job, not a manual process.
 - **Embedding isolation:** Face embeddings are scoped to an event. Never share or cross-reference embeddings across events.
 - **No third-party embedding sharing:** Embeddings are never sent to any external analytics, logging, or data pipeline. Strip them from all logs.
+- **Public/organizer boundary:** Attendee lookup and invite endpoints return sanitized public context only. Full event details and management actions require the organizer management token.
 - **Right to deletion:** `DELETE /events/:id` must cascade-delete R2 objects, Turso rows, and any queued Modal jobs for that event.
 
 ---
@@ -198,6 +202,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - Selfie-based matching
 - 200px + 800px thumbnails
 - 6-digit event code + QR code
+- One processing submission per event in Phase 1; later uploads require a separate event.
 - 30-day auto-expiry
 - Free tier: 100 photos max
 

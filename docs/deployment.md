@@ -2,7 +2,7 @@
 
 This document is not just a hosting guide. It is the current-state checklist of what is still left before GrabPic can be treated as a production product.
 
-As of August 27, 2026, the repository contains the implementation for the six P0 blocker paths. External staging/production verification is still required before a production claim.
+As of August 28, 2026, the repository contains the implementation for the six P0 blocker paths and the follow-up security fixes. External staging/production verification is still required before a production claim.
 
 ## Status Summary
 
@@ -15,7 +15,8 @@ Current state:
 
 Code-level blocker status:
 - Real FaceNet matching, Modal processing, signed asset delivery, thumbnails, opaque invites, and Cloudflare rate limits are implemented.
-- Organizer identity/authentication is not implemented; open public multi-tenant launch remains blocked on that external product decision.
+- New events issue a one-time high-entropy organizer management token; only its SHA-256 hash is stored. It protects organizer event detail, status, upload, confirmation, delete, and QR routes.
+- A full organizer identity provider, token recovery, and multi-tenant authorization policy are not implemented; open public multi-tenant launch remains blocked on that prerequisite.
 - No live integration or production verification was available during this change.
 
 ## P0 Blockers
@@ -93,14 +94,17 @@ Relevant files:
 - `apps/web/src/app/e/[code]/page.tsx`
 - `apps/web/src/app/attendee/page.tsx`
 
-### 6. Abuse protection — code-level closed for controlled/private pilot
+### 6. Abuse protection and organizer boundary — code-level closed for controlled/private pilot
 
 Implemented behavior:
-- Cloudflare Rate Limiting is applied to event creation, upload initiation/confirmation, manual event lookup, and match requests.
+- Cloudflare Rate Limiting is applied to event creation, upload initiation/confirmation, manual event lookup, and match requests. Upload keys use a client-global bucket rather than the caller-controlled event ID.
+- Upload initiation checks event existence, expiry, status, and organizer authorization before signing. Signed PUTs bind the declared `Content-Length`; confirmation checks R2 `HEAD` size before inserting photo rows.
+- The six-digit passcode is generated with CSPRNG and protected by a unique index. Existing duplicates are repaired during migration; creation retries on a unique conflict.
+- Confirmation atomically claims `processing_batch_id`, allowing one processing batch per MVP event and preventing concurrent batches from overwriting readiness counts.
 - Match accepts either a six-digit passcode or an opaque invite token and never logs embedding data.
-- No organizer identity provider exists in this repository, so organizer event management remains unauthenticated.
+- Attendee lookup/invite responses remain sanitized public context; full event detail and management actions require the organizer token.
 
-Status: rate limiting is implemented and the code is suitable for a controlled/private pilot. Organizer authentication remains the prerequisite for open public multi-tenant production.
+Status: rate limiting and the pilot organizer boundary are implemented. The code is suitable for a controlled/private pilot. Full organizer identity, recovery, and open public multi-tenant production remain unverified/prerequisite.
 
 ## P1 Operational Gaps
 

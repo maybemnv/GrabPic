@@ -97,6 +97,8 @@ sequenceDiagram
     API->>Attendee: Return matched gallery
 ```
 
+Organizer management routes require the one-time high-entropy bearer token returned by `POST /events`. Only its SHA-256 hash is stored. Upload confirmation accepts one processing batch per event, so later confirmations are rejected.
+
 ## Getting Started
 
 ```bash
@@ -130,6 +132,7 @@ pnpm vitest run
 ```
 
 Tests gracefully skip when env vars are missing, so they always pass on CI without secrets. Contract tests (type validation) run regardless.
+
 
 ## Lint
 

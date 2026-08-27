@@ -59,6 +59,8 @@
 - [x] POST /events/:id/upload — generate signed R2 URLs
 - [x] POST /events/:id/upload/confirm — trigger Modal processing
 - [x] POST /events/:id/match — selfie matching with passcode auth
+- [x] Organizer management token on protected event detail, status, upload, delete, and QR routes
+- [x] One atomic processing-batch claim per event
 
 ### Infrastructure
 - [x] Hono.js app with CORS + logger middleware
@@ -170,7 +172,8 @@
 - [x] Embedding isolation per event (no cross-event sharing)
 - [x] Right to deletion cascade (DELETE /events/:id)
 - [x] 30-day auto-expiry cron job (scheduled Worker)
-- [ ] Organizer authentication before open public multi-tenant launch
+- [x] High-entropy organizer management token for the controlled/private pilot
+- [ ] Full organizer identity provider, token recovery, and multi-tenant auth before open public launch
 - [x] Cloudflare Rate Limiting on event creation, lookup, upload, and match endpoints
 
 ## Documentation
