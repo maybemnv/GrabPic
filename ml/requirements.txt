@@ -1,4 +1,6 @@
+boto3
 facenet-pytorch
+fastapi
 torch
 torchvision
 pillow
