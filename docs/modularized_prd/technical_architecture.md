@@ -38,7 +38,7 @@
 ├─────────────────────┤   ├──────────────────────────────────────┤
 │ Cloudflare R2       │   │ Modal.com (GPU Serverless)           │
 │ - Original Photos   │   │ ├─ Face Detection (MTCNN/RetinaFace) │
-│ - Thumbnails        │   │ ├─ Embedding Gen (FaceNet/ArcFace)   │
+│ - Thumbnails        │   │ ├─ Embedding Gen (FaceNet vggface2)   │
 │ - CDN Delivery      │   │ └─ Clustering (DBSCAN)               │
 │                     │   │                                       │
 │ Cost: $0.015/GB     │   │ Cost: $0.10/min GPU                  │

@@ -344,7 +344,7 @@ Receives Link → Opens App → Takes Selfie → Views Gallery → Downloads →
 
 │ - Original Photos   │   │ ├─ Face Detection (MTCNN/RetinaFace) │
 
-│ - Thumbnails        │   │ ├─ Embedding Gen (FaceNet/ArcFace)   │
+│ - Thumbnails        │   │ ├─ Embedding Gen (FaceNet vggface2)   │
 
 │ - CDN Delivery      │   │ └─ Clustering (DBSCAN)               │
 
@@ -748,7 +748,7 @@ stub = modal.Stub("GrabPic-processor")
 
 )
 
-defprocess_event_photos(event_id:str,photo_urls: list[str]):
+defprocess_event_photos(event_id:str,photos: list[dict]):
 
     device = torch.device('cuda')
 
@@ -760,11 +760,11 @@ defprocess_event_photos(event_id:str,photo_urls: list[str]):
 
     results =[]
 
-    for url in photo_urls:
+    for photo in photos:
 
         # Download image
 
-        img = download_image(url)
+        img = download_image_from_r2(photo['r2_key'])
 
       
 
@@ -1342,9 +1342,7 @@ Match selfie to event photos
 
   "passcode":"123456",
 
-  "selfieData":"data:image/jpeg;base64,/9j/4AAQSkZJRg...",  // Base64
-
-  "threshold":0.6  // Optional, default 0.6
+  "selfieData":"data:image/jpeg;base64,/9j/4AAQSkZJRg..."  // Base64
 
 }
 
@@ -1639,7 +1637,7 @@ image =(
 
 )
 
-defprocess_event(event_id:str,photo_urls: List[str])-> Dict:
+defprocess_event(payload: Dict)-> Dict:
 
     """
 
@@ -1665,7 +1663,7 @@ defprocess_event(event_id:str,photo_urls: List[str])-> Dict:
 
     # Initialize models (cached after first cold start)
 
-    mtcnn = MTCNN(keep_all=True,device='cuda',post_process=False)
+    mtcnn = MTCNN(keep_all=True,device='cuda',post_process=True)
 
     resnet = InceptionResnetV1(pretrained='vggface2').eval().to('cuda')
 
@@ -1677,11 +1675,11 @@ defprocess_event(event_id:str,photo_urls: List[str])-> Dict:
 
     # Process each photo
 
-    for photo_url in photo_urls:
+    for photo in payload['photos']:
 
-        photo_id = extract_photo_id(photo_url)
+        photo_id = photo['photo_id']
 
-        img = download_and_preprocess(photo_url)
+        img = download_from_r2(photo['r2_key'])
 
       
 
@@ -1887,17 +1885,7 @@ defstore_faces_in_db(event_id:str,faces: List[Dict]):
 
 exportasyncfunctiononUploadComplete(req:Request){
 
-  const{eventId,photoIds}=awaitreq.json()
-
-  
-
-  // Get photo URLs from R2
-
-  constphotoUrls=photoIds.map(id=>
-
-    `https://r2.GrabPic.app/events/${eventId}/${id}.jpg`
-
-  )
+  const{event_id,photos}=awaitreq.json()
 
   
 
@@ -1917,9 +1905,8 @@ exportasyncfunctiononUploadComplete(req:Request){
 
     body:JSON.stringify({
 
-      event_id:eventId,
-
-      photo_urls:photoUrls
+      event_id:event_id,
+      photos:photos
 
     })
 

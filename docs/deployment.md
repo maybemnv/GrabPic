@@ -2,7 +2,7 @@
 
 This document is not just a hosting guide. It is the current-state checklist of what is still left before GrabPic can be treated as a production product.
 
-As of July 11, 2026, the repo is partially deployable as infrastructure, but not fully production-ready as a working product. The main gap is not hosting. The main gap is that parts of the photo-processing and match-delivery path are still placeholder or incomplete.
+As of August 27, 2026, the repository contains the implementation for the six P0 blocker paths. External staging/production verification is still required before a production claim.
 
 ## Status Summary
 
@@ -13,121 +13,79 @@ Current state:
 - Scheduled expiry cleanup exists in the Worker.
 - Basic docs, tests, and observability hooks exist.
 
-Not production-ready yet because:
-- The live match flow is still placeholder logic.
-- The Modal trigger contract does not match the processor implementation.
-- Photo result delivery endpoints are missing.
-- Thumbnail generation/storage is not wired end-to-end.
-- Share and QR flows are incomplete for real attendee onboarding.
-- Several deployment and hardening tasks are still undone.
+Code-level blocker status:
+- Real FaceNet matching, Modal processing, signed asset delivery, thumbnails, opaque invites, and Cloudflare rate limits are implemented.
+- Organizer identity/authentication is not implemented; open public multi-tenant launch remains blocked on that external product decision.
+- No live integration or production verification was available during this change.
 
 ## P0 Blockers
 
 These should be treated as release blockers. Do not call the product production-ready until these are resolved.
 
-### 1. Real selfie matching is not implemented yet
+### 1. Real selfie matching — code-level closed
 
-Current behavior:
-- `POST /events/:eventId/match` validates passcode and event status.
-- It does not generate a real selfie embedding.
-- It does not run actual cosine similarity against stored embeddings.
-- It returns synthetic similarity values derived from row order.
+Implemented behavior:
+- `POST /events/:eventId/match` accepts a passcode or opaque invite token and validates event status.
+- Modal `embed_selfie` uses `InceptionResnetV1(pretrained="vggface2")`, the same model and weights as batch processing.
+- The Worker decodes event-scoped 512-value embeddings, calculates dot-product similarity for normalized vectors, applies `MATCH_THRESHOLD`, and deduplicates by photo.
+- Malformed or failed Modal responses return a safe error without exposing embeddings.
 
-Impact:
-- The core product promise is not actually implemented in production terms.
-- A deployed system would look functional but produce fake or misleading match quality.
-
-Required before production:
-- Generate the selfie embedding server-side using the same model family and weights as batch processing.
-- Read stored embeddings for the event.
-- Compute actual similarity scores.
-- Return only real matched photos.
-- Define and enforce a production threshold policy.
+Verification remaining: run the deployed Modal endpoint and a real event/selfie flow.
 
 Relevant files:
 - `apps/api/src/routes/match.ts`
 - `ml/processor.py`
 
-### 2. The Worker -> Modal contract is inconsistent
+### 2. Worker -> Modal contract — code-level closed
 
-Current behavior:
-- The upload confirm route posts `{ event_id, photo_ids }` to `MODAL_WEBHOOK_URL`.
-- The Modal processor function currently expects `process_event(event_id, photo_urls)`.
-- There is no implemented adapter layer in this repo that turns `photo_ids` into actual R2-accessible photo URLs for the processor.
+Implemented behavior:
+- Upload confirmation posts one stable contract to `MODAL_WEBHOOK_URL`:
+  `{ "event_id": "...", "photos": [{ "photo_id": "...", "r2_key": "events/..." }] }`.
+- Modal validates event-scoped keys and reads originals directly from R2 using its `grabpic-r2` secret.
+- No expiring signed URL is used for processing.
 
-Impact:
-- Processing can fail even if the Worker is deployed correctly.
-- The API and ML service are not actually integrated end-to-end yet.
-
-Required before production:
-- Pick one contract and implement it fully.
-- Either send signed/readable R2 URLs to Modal, or make Modal fetch photo keys directly from R2 using bucket credentials.
-- Define the invocation surface clearly: webhook, RPC, or queue-driven job.
-- Persist a real job identifier if job cancellation/deletion matters.
+Verification remaining: deploy the Modal app and confirm a real upload reaches the R2 object and returns `ready`.
 
 Relevant files:
 - `apps/api/src/routes/upload.ts`
 - `ml/processor.py`
 
-### 3. Match result asset delivery is incomplete
+### 3. Match result asset delivery — code-level closed
 
-Current behavior:
-- Match responses return paths like `/api/photos/:id` and `/api/thumbs/:id`.
-- There are no routes implementing those endpoints in the Worker.
+Implemented behavior:
+- Match responses return short-lived SigV4-presigned R2 GET URLs directly.
+- The Worker uses `aws4fetch`; raw bucket URLs and placeholder `/api/photos/:id` or `/api/thumbs/:id` paths are not returned.
+- Original and 800px thumbnail URLs expire after five minutes.
 
-Impact:
-- Even if a match is found, attendees cannot reliably open the resulting images.
-- Gallery links are effectively placeholders.
-
-Required before production:
-- Add Worker routes to return signed original-photo URLs and signed thumbnail URLs.
-- Or return signed R2 URLs directly from the match route.
-- Decide URL expiration policy and cache policy.
+Verification remaining: open both returned URLs against the deployed R2 bucket.
 
 Relevant files:
 - `apps/api/src/routes/match.ts`
 - `apps/api/src/index.ts`
 
-### 4. Thumbnail generation is not wired end-to-end
+### 4. Thumbnail generation — code-level closed
 
-Current behavior:
-- The schema supports `thumbnail_200_key` and `thumbnail_800_key`.
-- The product docs assume thumbnails exist.
-- The current processor does not generate thumbnails or write thumbnail keys back to the database.
+Implemented behavior:
+- Modal writes deterministic 200px and 800px JPEGs to `events/<event_id>/thumbs/{200,800}/<photo_id>.jpg`.
+- The processor persists both keys and original dimensions in Turso.
+- Event deletion and scheduled expiry already delete original, 200px, 800px, face, embedding, and match-session records.
 
-Impact:
-- Gallery performance and image previews are incomplete.
-- Returned thumbnail URLs cannot be trusted to exist.
-
-Required before production:
-- Generate 200px and 800px thumbnails during processing.
-- Store thumbnail object keys in the `photos` table.
-- Ensure cleanup deletes originals and thumbnails consistently.
+Verification remaining: confirm the two objects exist after a deployed processing job and are removed by deletion/expiry.
 
 Relevant files:
 - `packages/db/src/index.ts`
 - `ml/processor.py`
 - `apps/api/src/lib/event-cleanup.ts`
 
-### 5. Share link and QR flow are incomplete
+### 5. Share link and QR flow — code-level closed
 
-Current behavior:
-- Event creation returns `https://grabpic.app/e/{passcode}`.
-- `/e/[code]` redirects to `/attendee?code=...`.
-- The attendee page currently requires manual `eventId` entry and does not consume the `code` query param.
-- The QR route uses only passcode-based navigation, but the attendee flow still depends on event ID.
+Implemented behavior:
+- Event creation stores a cryptographically random `invite_token` separately from the six-digit manual passcode.
+- Share links and QR codes use `/e/<inviteToken>`; the passcode is not placed in user-facing URLs.
+- The invite endpoint resolves event context, and the attendee page submits the invite token directly to matching.
+- Manual attendees submit only the six-digit passcode; event ID entry is removed.
 
-Impact:
-- Organizer share flow is not coherent.
-- QR scans and share links do not complete the intended user journey.
-
-Required before production:
-- Decide the actual attendee entry model:
-  - passcode only, or
-  - passcode + event lookup, or
-  - opaque invite token.
-- If passcode-only, add lookup by passcode and auto-resolve event context.
-- If event ID remains required, stop advertising passcode-only links and QR codes.
+Verification remaining: scan a deployed QR code and confirm the consent-gated attendee flow reaches matching.
 
 Relevant files:
 - `apps/api/src/routes/events.ts`
@@ -135,24 +93,14 @@ Relevant files:
 - `apps/web/src/app/e/[code]/page.tsx`
 - `apps/web/src/app/attendee/page.tsx`
 
-### 6. Production access control is too weak
+### 6. Abuse protection — code-level closed for controlled/private pilot
 
-Current behavior:
-- Organizer flows are unauthenticated.
-- Match requests are passcode-protected only.
-- There is no rate limiting on the match route.
+Implemented behavior:
+- Cloudflare Rate Limiting is applied to event creation, upload initiation/confirmation, manual event lookup, and match requests.
+- Match accepts either a six-digit passcode or an opaque invite token and never logs embedding data.
+- No organizer identity provider exists in this repository, so organizer event management remains unauthenticated.
 
-Impact:
-- Abuse risk is high.
-- Organizer event management is not protected strongly enough for public production.
-- Passcode brute-force and traffic abuse are realistic concerns.
-
-Required before production:
-- Add rate limiting on `POST /events/:eventId/match`.
-- Add some organizer auth model before public multi-tenant launch.
-- Add basic abuse controls for event creation and upload endpoints.
-
-This may be acceptable for a private pilot with trusted organizers, but it is not enough for open public production.
+Status: rate limiting is implemented and the code is suitable for a controlled/private pilot. Organizer authentication remains the prerequisite for open public multi-tenant production.
 
 ## P1 Operational Gaps
 
@@ -172,15 +120,10 @@ These are not always code blockers, but they should be completed before a real l
 
 ### Worker config cleanup
 
-Current issue:
-- `apps/api/wrangler.toml` still includes a `[[d1_databases]]` block with an empty `database_id`.
-- The current API code uses Turso, not Cloudflare D1.
-
-Required before production:
-- Remove the unused D1 binding, or
-- Intentionally migrate to D1 and then update the code accordingly.
-
-Do not leave the current blank D1 config in a production deployment path.
+Status:
+- The unused D1 binding has been removed from `apps/api/wrangler.toml`.
+- The API continues to use Turso.
+- The Worker now requires `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for SigV4 upload/download URLs.
 
 ### CI/CD is still missing
 
@@ -223,7 +166,8 @@ Still required:
 
 Still required:
 - Fill production env vars.
-- Remove or resolve the unused D1 binding.
+- Configure the `RATE_LIMITER` binding from `apps/api/wrangler.toml`.
+- Configure R2 S3 credentials as Worker secrets; never put them in `wrangler.toml` vars.
 - Deploy Worker.
 - Attach `api.grabpic.app`.
 - Verify cron trigger for expiry cleanup.
@@ -232,9 +176,11 @@ Still required:
 
 Still required:
 - Create production Modal app/account setup.
-- Store Turso credentials as Modal secrets.
-- Decide how Modal reads originals and writes thumbnails.
+- Store `TURSO_URL` and `TURSO_TOKEN` in `turso-credentials`.
+- Store `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` in `grabpic-r2`.
+- Store the shared Worker/Modal bearer value as `MODAL_TOKEN` in `grabpic-modal-auth`.
 - Deploy `ml/processor.py`.
+- Set `MODAL_WEBHOOK_URL` to the deployed `process_event` endpoint and `MODAL_EMBEDDING_URL` to the deployed `embed_selfie` endpoint.
 - Verify invocation path from Worker.
 
 ### 5. Frontend Hosting
@@ -316,12 +262,4 @@ Do not call the system production-ready until all of these pass in a deployed en
 
 ## Bottom Line
 
-GrabPic is not blocked by frontend scaffolding or basic infrastructure code. It is blocked by a handful of core production-path gaps:
-- real matching,
-- real ML integration,
-- real asset delivery,
-- real thumbnail pipeline,
-- real attendee entry flow,
-- and minimum abuse protection.
-
-Once those are done, the remaining work becomes normal deployment and operations.
+The six code-level P0 blockers are addressed. The repository is suitable for a controlled/private pilot after infrastructure deployment and end-to-end verification. Open public multi-tenant production remains blocked by organizer authentication, which is not present in this repository and was intentionally not invented in this pass.
