@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   passcode TEXT NOT NULL,
+  invite_token TEXT,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   status TEXT DEFAULT 'processing',
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_passcode ON events(passcode);
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 CREATE INDEX IF NOT EXISTS idx_events_expires_at ON events(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_invite_token ON events(invite_token);
 
 CREATE TABLE IF NOT EXISTS photos (
   id TEXT PRIMARY KEY,
