@@ -13,6 +13,7 @@ export async function createSignedR2Url(
   method: 'GET' | 'PUT',
   expiresIn: number,
   contentType?: string,
+  contentLength?: number,
 ): Promise<string> {
   const endpoint = env.R2_ENDPOINT.replace(/\/$/, '')
   const objectPath = key.split('/').map(encodeURIComponent).join('/')
@@ -27,7 +28,10 @@ export async function createSignedR2Url(
   }).sign(
     new Request(url, {
       method,
-      headers: contentType ? { 'Content-Type': contentType } : undefined,
+      headers: {
+        ...(contentType ? { 'Content-Type': contentType } : {}),
+        ...(contentLength == null ? {} : { 'Content-Length': String(contentLength) }),
+      },
     }),
     { aws: { signQuery: true } },
   )

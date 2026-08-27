@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AppContext } from '../index'
 import { findMatches, resolveMatchThreshold } from '../lib/matching'
 import { requestSelfieEmbedding } from '../lib/modal'
-import { rateLimitKey } from '../lib/rate-limit'
+import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
 
 const app = new Hono<AppContext>()
@@ -68,7 +68,7 @@ app.post('/', async (c) => {
   }
 
   try {
-    const limit = await c.env.RATE_LIMITER.limit({ key: rateLimitKey('match', eventId, clientId) })
+    const limit = await c.env.RATE_LIMITER.limit({ key: globalRateLimitKey('match', clientId) })
     if (!limit.success) {
       return c.json({ error: 'Too many match requests', code: 'RATE_LIMITED' }, 429)
     }

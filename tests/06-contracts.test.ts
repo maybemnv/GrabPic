@@ -27,6 +27,7 @@ describe('API Contract Validation (Type Shapes)', () => {
     const validResponse: CreateEventResponse = {
       eventId: 'evt_1a2b3c4d',
       passcode: '123456',
+      organizerToken: 'a'.repeat(43),
       uploadUrl: '/events/evt_1a2b3c4d/upload',
       shareUrl: 'https://grabpic.app/e/0123456789abcdef0123456789abcdef',
       qrCode: 'https://api.grabpic.app/qr/evt_1a2b3c4d',
@@ -42,6 +43,7 @@ describe('API Contract Validation (Type Shapes)', () => {
     it('validates response has all fields', () => {
       expect(validResponse.eventId).toMatch(/^evt_/)
       expect(validResponse.passcode).toMatch(/^\d{6}$/)
+      expect(validResponse.organizerToken).toHaveLength(43)
       expect(validResponse.uploadUrl).toContain('/upload')
       expect(validResponse.shareUrl).toContain('grabpic.app')
       expect(validResponse.expiresAt).toBeGreaterThan(0)
