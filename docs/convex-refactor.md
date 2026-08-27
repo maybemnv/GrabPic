@@ -12,8 +12,10 @@ Cloudflare rate limiting. The Worker calls Convex through
 Worker callback. Do not add dual writes, a backend selector, a Turso importer,
 or direct frontend Convex access.
 
-Keep five-second status polling. Defer Convex realtime subscriptions until
-organizer authentication exists.
+Keep five-second status polling. Do not add direct Convex realtime
+subscriptions in this migration; the migration must preserve and enforce
+whatever organizer-management authorization boundary exists in the final
+signed-off P0 baseline.
 
 ## Implementation Stages
 
@@ -73,11 +75,17 @@ service secret. Never log function arguments containing embeddings or secrets.
 - Preserve the signed-off P0 endpoint paths, response fields, error envelopes,
   invite/passcode behavior, external IDs, and status codes. Never expose Convex
   `_id` values.
-- Make upload confirmation idempotent and atomic: validate event limits, insert
-  or recognize photo IDs, avoid double-counting, and create or reuse one
-  processing job.
-- Trigger Modal only after the mutation succeeds. Persist the accepted Modal
-  job ID; trigger failures remain observable and retryable.
+- Make upload confirmation idempotent and atomic: require the organizer
+  authorization/ownership validation established by the signed-off P0
+  baseline, validate event existence and state, enforce `maxPhotos`, recognize
+  already-confirmed photo IDs, avoid duplicate photo-count increments, and
+  create or reuse exactly one processing job for the submission.
+- After the Convex mutation succeeds, the Worker invokes Modal and requires an
+  explicit acceptance response containing a real Modal job identifier. Persist
+  that accepted job ID before returning `202 Processing`. If Modal does not
+  accept the request, return the documented failure status (preferably `502`),
+  retain the Convex job in an observable retryable state, do not mark the event
+  ready, and do not silently swallow the trigger failure.
 - Keep the organizer's existing five-second polling flow.
 
 ### 4. Replace the similarity scan
@@ -106,7 +114,16 @@ fixtures must prove that required results are not lost.
 - Modal sends idempotent result batches containing job/event IDs, photo
   metadata, thumbnail keys, and no more than 25 faces per batch. Each face
   contains its ID, box, confidence, cluster, landmarks, and 512-number vector.
-- Convex upserts by event-scoped public IDs and rejects wrong-event payloads.
+- Callback bodies containing embeddings, embeddings themselves, and service
+  secrets must never be logged or attached to Sentry/error metadata.
+- Worker validation must require the callback job ID and event ID to agree with
+  the existing processing job, every returned photo to belong to that
+  event/job, every face to belong to a returned/known photo, and every
+  embedding to be finite, normalized, and exactly 512-dimensional.
+- Convex upserts by event-scoped public IDs and rejects wrong-event and
+  stale-job payloads. Duplicate callback delivery is idempotent. Callbacks
+  received after an event enters `deleting` or has been deleted are rejected
+  and must never recreate biometric state.
 - Modal sends a final summary only after every batch succeeds. Completion marks
   the job and event ready; failure records a sanitized retryable error.
 - Duplicate upload confirmation and callback delivery must not duplicate rows,
@@ -160,12 +177,24 @@ Run:
 - `python -m compileall ml`
 
 Add focused tests for schema/access validation, service authentication,
-invite/passcode lookup, max-photo enforcement, idempotent upload confirmation,
-event-filtered vector search, threshold boundaries, ranking, deduplication,
-malformed vectors, Modal batch validation, duplicate callbacks, wrong-event
-rejection, processing completion/failure, no raw IP/vector persistence,
-partial R2 deletion, cancellation failure, retry, batched purge, expiry, and
-signed R2 delivery.
+organizer ownership authorization, event existence/state validation,
+max-photo enforcement, recognition of already-confirmed photo IDs,
+idempotent upload confirmation, exactly-one processing-job creation,
+explicit Modal acceptance before `202`, trigger failure status and retryable
+job state, invite/passcode lookup, event-filtered vector search, threshold
+boundaries, ranking, deduplication, malformed vectors, Modal batch validation,
+duplicate callbacks, wrong-event callbacks, stale-job rejection,
+callback-after-deletion rejection, processing completion/failure, no raw
+IP/vector persistence, partial R2 deletion, cancellation failure, retry,
+batched purge, expiry, and signed R2 delivery.
+
+The callback-after-deletion race is mandatory before cutover acceptance:
+
+1. A Modal job is processing.
+2. Event deletion begins and the event enters `deleting`.
+3. A delayed Modal callback arrives.
+4. Worker/Convex reject it.
+5. No photos, faces, embeddings, counts, or processing state are recreated.
 
 Run real Convex staging tests in addition to mocked Convex tests, because the
 mock does not reproduce production ANN behavior or backend limits.
@@ -190,5 +219,6 @@ runtime, or Convex does not reduce complexity enough to justify the added
 function layer.
 
 Assumptions: Turso is empty; cutover occurs before public traffic; status stays
-Worker-polled; organizer authentication is separate; and the frontend does
-not connect directly to Convex.
+Worker-polled; the migration preserves and enforces whatever
+organizer-management authorization mechanism is present in the final
+signed-off P0 baseline; and the frontend does not connect directly to Convex.
