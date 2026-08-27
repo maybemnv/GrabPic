@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppContext } from '../index'
 import { cleanupEventResources } from '../lib/event-cleanup'
+import { rateLimitKey } from '../lib/rate-limit'
 
 const app = new Hono<AppContext>()
 
@@ -11,6 +12,8 @@ const createEventSchema = z.object({
   organizerName: z.string().min(1).max(100),
   expiryDays: z.number().int().min(1).max(90).default(30),
 })
+
+const lookupEventSchema = z.object({ passcode: z.string().regex(/^\d{6}$/) })
 
 function generatePasscode(): string {
   return String(Math.floor(100000 + Math.random() * 900000))
@@ -29,6 +32,15 @@ app.post('/', async (c) => {
   const log = c.get('logger')
   const sentry = c.get('sentry')
   try {
+    const clientId =
+      c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const limit = await c.env.RATE_LIMITER.limit({
+      key: rateLimitKey('create-event', '', clientId),
+    })
+    if (!limit.success) {
+      return c.json({ error: 'Too many event creation requests', code: 'RATE_LIMITED' }, 429)
+    }
+
     const body = await c.req.json()
     const parsed = createEventSchema.safeParse(body)
     if (!parsed.success) {
@@ -38,6 +50,7 @@ app.post('/', async (c) => {
     const { name, organizerEmail, organizerName, expiryDays } = parsed.data
     const eventId = generateId('evt')
     const passcode = generatePasscode()
+    const inviteToken = crypto.randomUUID().replaceAll('-', '')
     const now = Math.floor(Date.now() / 1000)
 
     const db = (await import('@libsql/client')).createClient({
@@ -46,9 +59,18 @@ app.post('/', async (c) => {
     })
 
     await db.execute({
-      sql: `INSERT INTO events (id, name, passcode, created_at, expires_at, status, organizer_email, organizer_name)
-            VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)`,
-      args: [eventId, name, passcode, now, now + expiryDays * 86400, organizerEmail, organizerName],
+      sql: `INSERT INTO events (id, name, passcode, invite_token, created_at, expires_at, status, organizer_email, organizer_name)
+            VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)`,
+      args: [
+        eventId,
+        name,
+        passcode,
+        inviteToken,
+        now,
+        now + expiryDays * 86400,
+        organizerEmail,
+        organizerName,
+      ],
     })
 
     log.info('event: created', { eventId, name, organizerEmail })
@@ -58,7 +80,7 @@ app.post('/', async (c) => {
         eventId,
         passcode,
         uploadUrl: `/events/${eventId}/upload`,
-        shareUrl: `https://grabpic.app/e/${passcode}`,
+        shareUrl: `https://grabpic.app/e/${inviteToken}`,
         qrCode: `https://api.grabpic.app/qr/${eventId}`,
         expiresAt: now + expiryDays * 86400,
       },
@@ -69,6 +91,52 @@ app.post('/', async (c) => {
     sentry.captureException(err, { route: 'createEvent' })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
+})
+
+app.post('/lookup', async (c) => {
+  const clientId = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+  const limit = await c.env.RATE_LIMITER.limit({ key: rateLimitKey('event-lookup', '', clientId) })
+  if (!limit.success) {
+    return c.json({ error: 'Too many event lookup requests', code: 'RATE_LIMITED' }, 429)
+  }
+
+  const parsed = lookupEventSchema.safeParse(await c.req.json())
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
+  }
+
+  const db = (await import('@libsql/client')).createClient({
+    url: c.env.TURSO_URL,
+    authToken: c.env.TURSO_TOKEN,
+  })
+  const result = await db.execute({
+    sql: 'SELECT id, name, status FROM events WHERE passcode = ?',
+    args: [parsed.data.passcode],
+  })
+  if (result.rows.length === 0) {
+    return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+  }
+
+  const row = result.rows[0] as Record<string, unknown>
+  return c.json({ eventId: String(row.id), name: String(row.name), status: String(row.status) })
+})
+
+app.get('/invite/:inviteToken', async (c) => {
+  const inviteToken = c.req.param('inviteToken')
+  const db = (await import('@libsql/client')).createClient({
+    url: c.env.TURSO_URL,
+    authToken: c.env.TURSO_TOKEN,
+  })
+  const result = await db.execute({
+    sql: 'SELECT id, name, status FROM events WHERE invite_token = ?',
+    args: [inviteToken],
+  })
+  if (result.rows.length === 0) {
+    return c.json({ error: 'Invite not found', code: 'NOT_FOUND' }, 404)
+  }
+
+  const row = result.rows[0] as Record<string, unknown>
+  return c.json({ eventId: String(row.id), name: String(row.name), status: String(row.status) })
 })
 
 app.get('/:eventId', async (c) => {
