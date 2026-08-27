@@ -49,9 +49,15 @@ export interface EventStatusResponse {
 }
 
 export interface MatchPayload {
-  passcode: string
+  passcode?: string
+  inviteToken?: string
   selfieData: string
-  threshold?: number
+}
+
+export interface EventAccessResponse {
+  eventId: string
+  name: string
+  status: 'processing' | 'ready' | 'expired' | 'failed'
 }
 
 export interface MatchResponse {
@@ -62,7 +68,10 @@ export interface MatchResponse {
     thumbnailUrl: string
     width: number
     height: number
-    faces: Array<{ bbox: { x: number; y: number; width: number; height: number }; isMatch: boolean }>
+    faces: Array<{
+      bbox: { x: number; y: number; width: number; height: number }
+      isMatch: boolean
+    }>
   }>
   totalMatches: number
   processingTime: number
@@ -85,11 +94,25 @@ export function getEvent(eventId: string) {
   return request<Record<string, unknown>>(`/events/${eventId}`)
 }
 
+export function lookupEvent(passcode: string) {
+  return request<EventAccessResponse>('/events/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ passcode }),
+  })
+}
+
+export function getEventByInviteToken(inviteToken: string) {
+  return request<EventAccessResponse>(`/events/invite/${encodeURIComponent(inviteToken)}`)
+}
+
 export function getEventStatus(eventId: string) {
   return request<EventStatusResponse>(`/events/${eventId}/status`)
 }
 
-export function getUploadUrls(eventId: string, photos: Array<{ filename: string; size: number; type: string }>) {
+export function getUploadUrls(
+  eventId: string,
+  photos: Array<{ filename: string; size: number; type: string }>,
+) {
   return request<UploadUrlsResponse>(`/events/${eventId}/upload`, {
     method: 'POST',
     body: JSON.stringify({ photos }),
