@@ -1,13 +1,9 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppContext } from '../index'
-
-interface SignedUrlBucket extends R2Bucket {
-  createSignedUrl(
-    key: string,
-    options: { expiration: number; method: 'PUT' | 'GET' | 'DELETE' },
-  ): Promise<string>
-}
+import { buildProcessingRequest } from '../lib/modal'
+import { rateLimitKey } from '../lib/rate-limit'
+import { createSignedR2Url } from '../lib/r2'
 
 const app = new Hono<AppContext>()
 
@@ -27,6 +23,10 @@ const uploadSchema = z.object({
     .max(1000),
 })
 
+const confirmUploadSchema = z.object({
+  photoIds: z.array(z.string().min(1)).min(1).max(1000),
+})
+
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
   const log = c.get('logger')
@@ -36,6 +36,15 @@ app.post('/', async (c) => {
   }
 
   try {
+    const clientId =
+      c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const limit = await c.env.RATE_LIMITER.limit({
+      key: rateLimitKey('upload-initiation', eventId, clientId),
+    })
+    if (!limit.success) {
+      return c.json({ error: 'Too many upload requests', code: 'RATE_LIMITED' }, 429)
+    }
+
     const body = await c.req.json()
     const parsed = uploadSchema.safeParse(body)
     if (!parsed.success) {
@@ -43,17 +52,12 @@ app.post('/', async (c) => {
     }
 
     const { photos } = parsed.data
-    const bucket = c.env.PHOTOS as SignedUrlBucket
-
     const uploadUrls = await Promise.all(
       photos.map(async (photo) => {
         const photoId = `photo_${crypto.randomUUID().slice(0, 8)}`
         const key = `events/${eventId}/${photoId}.jpg`
 
-        const uploadUrl = await bucket.createSignedUrl(key, {
-          expiration: Math.floor(Date.now() / 1000) + 3600,
-          method: 'PUT',
-        })
+        const uploadUrl = await createSignedR2Url(c.env, key, 'PUT', 3600, photo.type)
 
         return { photoId, uploadUrl, filename: photo.filename }
       }),
@@ -77,12 +81,20 @@ app.post('/confirm', async (c) => {
   }
 
   try {
-    const body = await c.req.json()
-    const { photoIds } = body as { photoIds: string[] }
-
-    if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      return c.json({ error: 'photoIds required', code: 'VALIDATION_ERROR' }, 400)
+    const clientId =
+      c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const limit = await c.env.RATE_LIMITER.limit({
+      key: rateLimitKey('upload-confirmation', eventId, clientId),
+    })
+    if (!limit.success) {
+      return c.json({ error: 'Too many upload requests', code: 'RATE_LIMITED' }, 429)
     }
+
+    const parsed = confirmUploadSchema.safeParse(await c.req.json())
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
+    }
+    const { photoIds } = parsed.data
 
     const now = Math.floor(Date.now() / 1000)
     const db = (await import('@libsql/client')).createClient({
@@ -104,6 +116,10 @@ app.post('/confirm', async (c) => {
     })
 
     if (c.env.MODAL_WEBHOOK_URL && c.env.MODAL_TOKEN) {
+      const processingRequest = buildProcessingRequest(
+        eventId,
+        photoIds.map((id) => ({ id, r2Key: `events/${eventId}/${id}.jpg` })),
+      )
       c.executionCtx.waitUntil(
         fetch(c.env.MODAL_WEBHOOK_URL, {
           method: 'POST',
@@ -111,10 +127,14 @@ app.post('/confirm', async (c) => {
             Authorization: `Bearer ${c.env.MODAL_TOKEN}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ event_id: eventId, photo_ids: photoIds }),
-        }).catch((modalErr) => {
-          sentry.captureException(modalErr, { route: 'modalWebhook', eventId })
-        }),
+          body: JSON.stringify(processingRequest),
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error(`Modal processing failed with ${response.status}`)
+          })
+          .catch((modalErr) => {
+            sentry.captureException(modalErr, { route: 'modalWebhook', eventId })
+          }),
       )
     }
 
