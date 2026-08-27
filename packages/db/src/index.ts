@@ -13,6 +13,7 @@ export const schema = {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       passcode TEXT NOT NULL,
+      invite_token TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL,
       status TEXT DEFAULT 'processing',
@@ -81,5 +82,24 @@ export async function migrate(url: string, authToken: string) {
   const db = createDbClient(url, authToken)
   for (const [name, sql] of Object.entries(schema)) {
     await db.execute(sql)
+  }
+
+  try {
+    await db.execute('ALTER TABLE events ADD COLUMN invite_token TEXT')
+  } catch (error) {
+    if (!String(error).toLowerCase().includes('duplicate column')) throw error
+  }
+  await db.execute(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_events_invite_token ON events(invite_token)',
+  )
+
+  const eventsWithoutInvites = await db.execute(
+    "SELECT id FROM events WHERE invite_token IS NULL OR invite_token = ''",
+  )
+  for (const row of eventsWithoutInvites.rows) {
+    await db.execute({
+      sql: 'UPDATE events SET invite_token = ? WHERE id = ?',
+      args: [crypto.randomUUID().replaceAll('-', ''), String((row as Record<string, unknown>).id)],
+    })
   }
 }
