@@ -30,8 +30,6 @@ function testEnv(): Env {
     MATCH_THRESHOLD: '0.6',
     CONVEX_URL: 'https://convex.example.test',
     CONVEX_SERVICE_SECRET: 'worker-secret',
-    TURSO_URL: 'libsql://unused.test',
-    TURSO_TOKEN: 'unused',
   }
 }
 

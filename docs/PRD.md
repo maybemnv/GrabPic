@@ -1,4 +1,9 @@
-# GrabPic - Product Requirements Document (PRD)
+# Archived GrabPic Product Requirements Document (PRD)
+
+> Historical planning snapshot. The Turso/SQL architecture described below is
+> obsolete. The only current production architecture is documented in
+> [README.md](../README.md), [deployment.md](deployment.md), and
+> [technical_architecture.md](modularized_prd/technical_architecture.md).
 
 **Version:** 1.0
 

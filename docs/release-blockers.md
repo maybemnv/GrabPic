@@ -14,9 +14,9 @@ Status: code-level blocker and review-fix work complete; external integration is
 
 ## Verification Status
 
-Review fixes: organizer management routes require a one-time high-entropy bearer token whose SHA-256 hash is stored; public attendee lookup remains sanitized. Uploads validate the event before signing, use a client-global rate-limit bucket, bind declared content length, and verify actual R2 size before persistence. Passcodes are CSPRNG-generated and unique while retained. One atomic processing-batch claim prevents concurrent readiness overwrites. Modal uses the synchronous libSQL client for its synchronous handlers, and migrations execute one SQL statement per client call.
+Review fixes: organizer management routes require a one-time high-entropy bearer token whose SHA-256 hash is stored; public attendee lookup remains sanitized. Uploads validate the event before signing, use a client-global rate-limit bucket, bind declared content length, and verify actual R2 size before persistence. Passcodes are CSPRNG-generated and unique while retained. Convex mutations make upload confirmation and processing readiness atomic.
 
 - Code-level: completed and covered by focused TypeScript and Python tests.
-- Local static validation: lint, build, focused Vitest suites, Python unit tests, and Python compilation are run before commit. The full integration suite requires a reachable API/Turso environment.
-- External integration: not verified in this environment. The local `.env` has no usable Modal/Cloudflare credentials and points the API at localhost.
-- Production status: not claimed. Deploy Turso/R2/Modal/Worker/frontend and run the end-to-end smoke flow. Full organizer identity, recovery, and open public multi-tenant authorization remain prerequisites.
+- Local static validation: lint, build, full Vitest suite, Python unit tests, and Python compilation are run before commit. Infrastructure tests are explicitly opt-in with `RUN_REAL_INFRA_TESTS=1`.
+- External integration: not verified in this environment. The local environment has no usable Modal/Cloudflare deployment credentials.
+- Production status: not claimed. Deploy Convex/R2/Modal/Worker/frontend and run the end-to-end smoke flow. Full organizer identity, recovery, and open public multi-tenant authorization remain prerequisites.

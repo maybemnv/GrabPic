@@ -37,8 +37,6 @@ function testEnv(): Env {
     MODAL_CANCEL_URL: 'https://modal.test/cancel',
     MODAL_EMBEDDING_URL: '',
     MATCH_THRESHOLD: '0.6',
-    TURSO_URL: 'libsql://unused.test',
-    TURSO_TOKEN: 'unused',
     CONVEX_URL: 'https://convex.example.test',
     CONVEX_SERVICE_SECRET: 'worker-secret',
   }

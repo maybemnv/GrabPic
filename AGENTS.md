@@ -5,7 +5,7 @@ GrabPic is a `pnpm`/Turborepo monorepo. Keep user-facing code in `apps/`, shared
 
 - `apps/web`: Next.js 14 frontend (`src/app`, `src/components`, `src/lib`)
 - `apps/api`: Cloudflare Workers API with Hono routes in `src/routes`
-- `packages/db`, `packages/types`, `packages/config`: shared workspace packages
+- `packages/types`, `packages/config`: shared workspace packages
 - `ml/processor.py`: Python 3.11 ML entry point, with dependencies in `ml/requirements.txt`
 - `tests/*.test.ts`: Vitest suites for contracts, latency, and throughput
 
@@ -60,7 +60,6 @@ grabpic/
 │   ├── web/          # Next.js 14+ (App Router). Organizer dashboard + attendee portal.
 │   └── api/          # Cloudflare Workers + Hono.js. Edge API layer.
 ├── packages/
-│   ├── db/           # Turso (libSQL) client, schema, migrations
 │   ├── types/        # Shared TypeScript types across apps
 │   └── config/       # Shared tsconfig, eslint configs
 ├── ml/
@@ -95,10 +94,10 @@ grabpic/
 - Thumbnail sizes: 200px (grid view), 800px (preview). 1600px added in Phase 2.
 - Upload initiation and confirmation are organizer-token protected; signed PUTs include the declared content length and confirmation verifies the stored R2 object size.
 
-### Database: Turso (libSQL / SQLite at edge)
-- Schema lives in `packages/db/schema.ts`
-- All queries go through the Turso client — never raw SQL strings in route handlers
-- Face embeddings stored as BLOB (serialized Float32Array). Vector similarity computed application-side for MVP; migrate to a dedicated vector DB (e.g. Turbopuffer) at scale.
+### Database: Convex
+- Schema and functions live in `apps/api/convex/`
+- The Worker calls Convex through `ConvexHttpClient`; the frontend and Modal do not connect directly.
+- Face embeddings are 512-dimensional normalized arrays in an event-filtered Convex vector index.
 
 ### Frontend: Next.js App Router
 - Organizer dashboard and attendee portal are separate route groups: `(organizer)` and `(attendee)`
@@ -115,7 +114,7 @@ Organizer uploads photos
   → API returns signed R2 URLs
   → Client uploads directly to R2 (bypasses Worker)
   → Worker triggers Modal job (async)
-  → Modal: detect faces → generate FaceNet embeddings → DBSCAN cluster → store in Turso
+  → Modal: detect faces → generate FaceNet embeddings → DBSCAN cluster → authenticated Worker callback → Convex
   → Organizer dashboard polls /events/:id/status
 ```
 
@@ -124,7 +123,7 @@ Organizer uploads photos
 Attendee takes selfie
   → POST /events/:id/match with selfie image
   → Worker: request a server-side FaceNet embedding from Modal (same model and weights as processing)
-  → Cosine similarity search against stored embeddings in Turso
+  → Convex event-filtered vector search against stored embeddings
   → Return top-N matching photo IDs
   → Client fetches signed R2 thumbnail URLs for matched photos
 ```
@@ -147,7 +146,7 @@ Attendee takes selfie
 
 ### DON'T
 - Don't run DBSCAN or any ML inference synchronously inside a Worker handler
-- Don't store face embeddings in R2 — they live in Turso for queryability
+- Don't store face embeddings in R2 — they live in Convex for event-scoped vector search
 - Don't use Next.js API routes for anything — all backend logic is in Cloudflare Workers
 - Don't generate thumbnails client-side — always server-side via Modal after upload
 - Don't expose event codes in URLs — codes are entered via form, never as query params
@@ -166,7 +165,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - **Embedding isolation:** Face embeddings are scoped to an event. Never share or cross-reference embeddings across events.
 - **No third-party embedding sharing:** Embeddings are never sent to any external analytics, logging, or data pipeline. Strip them from all logs.
 - **Public/organizer boundary:** Attendee lookup and invite endpoints return sanitized public context only. Full event details and management actions require the organizer management token.
-- **Right to deletion:** `DELETE /events/:id` must cascade-delete R2 objects, Turso rows, and any queued Modal jobs for that event.
+- **Right to deletion:** `DELETE /events/:id` must delete R2 objects, Convex rows, embeddings, and any queued Modal jobs for that event.
 
 ---
 

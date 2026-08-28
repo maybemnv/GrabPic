@@ -13,17 +13,17 @@
 - [x] Attendee portal (code entry, selfie capture, gallery)
 - [x] Edge API (Cloudflare Workers + Hono, all routes)
 - [x] ML pipeline (Modal: MTCNN + FaceNet vggface2 + DBSCAN)
-- [x] Test suite (7 test files, real infra)
+- [x] Test suite (Convex contract tests plus opt-in infrastructure suites)
 - [x] Monitoring (Sentry, PostHog, structured logging)
 - [x] Error boundary pages (404, error, global-error)
 - [x] QR code generation + redirect
 - [x] Documentation (deployment guide, API examples, todo)
 
 **Infrastructure (not yet provisioned)**
-- [ ] Turso database
+- [x] Convex schema and functions
 - [ ] Cloudflare R2 bucket
 - [ ] API Worker deployed
 - [ ] Modal function deployed
 - [ ] Frontend deployed
 
-- [ ] Build only after validation
+- [ ] Run deployed Convex/R2/Modal validation

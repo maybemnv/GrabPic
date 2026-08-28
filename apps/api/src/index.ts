@@ -29,8 +29,6 @@ export interface Env {
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
-  TURSO_URL: string
-  TURSO_TOKEN: string
 }
 
 export interface AppVariables {

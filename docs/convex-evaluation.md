@@ -50,22 +50,25 @@ record the Turso and Convex results for:
 
 ## Convex result
 
-Complete this section only after the staged Convex E2E path runs against the
-same fixture manifest.
+The local-only implementation is complete. The deployed E2E measurements
+remain pending until a real Convex, Worker, R2, and Modal environment is
+available.
 
 | Area | Turso | Convex |
 | --- | --- | --- |
-| Architecture | Worker, Turso, R2, Modal | pending |
-| Runtime services | Turso, R2, Modal, Worker | pending |
+| Architecture | Worker, Turso, R2, Modal | Worker, Convex, R2, Modal |
+| Runtime services | Turso, R2, Modal, Worker | Convex, R2, Modal, Worker |
 | Backend LOC | 1,772 | pending |
 | Matching latency | pending | pending |
 | E2E latency | pending | pending |
-| State-management complexity | SQL migrations and application scan | pending |
-| Deployment requirements | Turso migration, Worker, Modal, R2 | pending |
-| Estimated operating implications | pending | pending |
-| Remaining risks | Application scan scaling | pending |
+| State-management complexity | SQL migrations and application scan | Convex functions and event-filtered vector index; deployed measurement pending |
+| Deployment requirements | Turso migration, Worker, Modal, R2 | Convex functions, Worker, Modal, R2 |
+| Estimated operating implications | pending | Requires deployed usage measurement |
+| Remaining risks | Application scan scaling | 256-candidate ANN ceiling and missing deployed latency/cleanup evidence |
 
 ## Recommendation
 
-Pending Convex staging validation, including the 256-candidate vector-search
-limit, retryable deletion, and the five-second North Star.
+The local Convex path passes deterministic contract, isolation, callback, and
+retryable-cleanup tests. Do not merge or claim production readiness until the
+same fixture passes deployed E2E validation, including the 256-candidate
+vector-search limit and the five-second North Star.
