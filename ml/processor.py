@@ -1,4 +1,5 @@
 import base64
+import hmac
 import json
 import os
 import time
@@ -45,17 +46,25 @@ def normalize_embedding(values: Any) -> np.ndarray:
     return embedding / norm
 
 
+def timing_safe_equal(left: str, right: str) -> bool:
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def parse_processing_request(
     payload: Dict[str, Any],
-) -> Tuple[str, str, List[Dict[str, str]]]:
+) -> Tuple[str, str, int, List[Dict[str, str]]]:
     job_id = payload.get("job_id")
     event_id = payload.get("event_id")
+    attempt = payload.get("attempt")
     photos = payload.get("photos")
     if (
         not isinstance(job_id, str)
         or not job_id
         or not isinstance(event_id, str)
         or not event_id
+        or not isinstance(attempt, int)
+        or isinstance(attempt, bool)
+        or attempt < 1
         or not isinstance(photos, list)
         or not 1 <= len(photos) <= 1000
     ):
@@ -77,7 +86,7 @@ def parse_processing_request(
         ):
             raise ValueError("photo references must be scoped to the event")
         parsed.append({"photo_id": photo_id, "r2_key": r2_key})
-    return job_id, event_id, parsed
+    return job_id, event_id, attempt, parsed
 
 
 def thumbnail_keys(event_id: str, photo_id: str) -> Tuple[str, str]:
@@ -97,6 +106,7 @@ def accepted_job_id(call: Any) -> str:
 def build_callback_payloads(
     job_id: str,
     event_id: str,
+    attempt: int,
     photos: List[Dict[str, Any]],
     faces: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -109,6 +119,7 @@ def build_callback_payloads(
                 "status": "success",
                 "jobId": job_id,
                 "eventId": event_id,
+                "attempt": attempt,
                 "final": False,
                 "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
                 "faces": batch,
@@ -119,6 +130,7 @@ def build_callback_payloads(
             "status": "success",
             "jobId": job_id,
             "eventId": event_id,
+            "attempt": attempt,
             "final": True,
             "photos": photos,
             "faces": [],
@@ -158,22 +170,32 @@ def object_store():
     )
 
 
+_models = None
+
+
 def load_models():
+    global _models
+    if _models is not None:
+        return _models
+
     import torch
     from facenet_pytorch import MTCNN, InceptionResnetV1
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     detector = MTCNN(keep_all=True, device=device, post_process=True)
     resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
-    return detector, resnet, device
+    _models = detector, resnet, device
+    return _models
 
 
 def embed_faces(image, detector, resnet, device, one_face: bool = False):
+    boxes, probabilities = detector.detect(image, landmarks=False)
+    if boxes is None or probabilities is None:
+        return []
     import torch
 
-    boxes, probabilities = detector.detect(image, landmarks=False)
-    tensors = detector(image)
-    if boxes is None or probabilities is None or tensors is None:
+    tensors = detector.extract(image, boxes, None)
+    if tensors is None:
         return []
     if tensors.ndim == 3:
         tensors = tensors.unsqueeze(0)
@@ -221,7 +243,9 @@ def image_bytes(image, size: int) -> bytes:
 
 def require_auth(request) -> None:
     expected = os.environ.get("MODAL_TOKEN")
-    if not expected or request.headers.get("authorization") != f"Bearer {expected}":
+    if not expected or not timing_safe_equal(
+        request.headers.get("authorization", ""), f"Bearer {expected}"
+    ):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -231,7 +255,7 @@ def require_auth(request) -> None:
     image=image, gpu="T4", timeout=600, memory=4096, secrets=processing_secrets
 )
 def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
-    job_id, event_id, photos = parse_processing_request(payload)
+    job_id, event_id, attempt, photos = parse_processing_request(payload)
     store = object_store()
     detector, resnet, device = load_models()
     start = time.time()
@@ -302,6 +326,7 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
         for callback in build_callback_payloads(
             job_id,
             event_id,
+            attempt,
             processed_photos,
             all_faces,
         ):
@@ -312,7 +337,14 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
             "processing_time": processing_time,
         }
     except Exception:
-        send_callback({"status": "failed", "jobId": job_id, "eventId": event_id})
+        send_callback(
+            {
+                "status": "failed",
+                "jobId": job_id,
+                "eventId": event_id,
+                "attempt": attempt,
+            }
+        )
         raise
 
 
