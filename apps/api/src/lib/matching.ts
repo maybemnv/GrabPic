@@ -1,19 +1,3 @@
-export interface MatchFace {
-  eventId: string
-  photoId: string
-  embedding: unknown
-  bbox: { x: number; y: number; width: number; height: number } | null
-}
-
-export interface MatchResult {
-  photoId: string
-  similarity: number
-  faces: Array<{
-    bbox: { x: number; y: number; width: number; height: number }
-    isMatch: boolean
-  }>
-}
-
 export const DEFAULT_MATCH_THRESHOLD = 0.6
 
 export function resolveMatchThreshold(value?: string): number {
@@ -68,47 +52,4 @@ function validateEmbedding(embedding: Float32Array): Float32Array {
     for (let index = 0; index < embedding.length; index += 1) embedding[index] /= norm
   }
   return embedding
-}
-
-function dotProduct(left: Float32Array, right: Float32Array): number {
-  let result = 0
-  for (let index = 0; index < left.length; index += 1) result += left[index] * right[index]
-  return Math.min(1, Math.max(-1, result))
-}
-
-export function findMatches({
-  eventId,
-  selfieEmbedding,
-  faces,
-  threshold,
-}: {
-  eventId: string
-  selfieEmbedding: unknown
-  faces: MatchFace[]
-  threshold: number
-}): MatchResult[] {
-  if (!Number.isFinite(threshold) || threshold < -1 || threshold > 1) {
-    throw new Error('Threshold must be between -1 and 1')
-  }
-
-  const selfie = decodeEmbedding(selfieEmbedding)
-  const results = new Map<string, MatchResult>()
-
-  for (const face of faces) {
-    if (face.eventId !== eventId) continue
-
-    const similarity = dotProduct(selfie, decodeEmbedding(face.embedding))
-    if (similarity < threshold) continue
-
-    const existing = results.get(face.photoId)
-    if (existing && existing.similarity > similarity) continue
-
-    results.set(face.photoId, {
-      photoId: face.photoId,
-      similarity,
-      faces: face.bbox ? [{ bbox: face.bbox, isMatch: true }] : [],
-    })
-  }
-
-  return [...results.values()].sort((left, right) => right.similarity - left.similarity)
 }

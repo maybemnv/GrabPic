@@ -113,4 +113,35 @@ describe('Convex match route', () => {
     expect(requestSelfieEmbeddingMock).not.toHaveBeenCalled()
     expect(client.action).not.toHaveBeenCalled()
   })
+
+  it('signs all matched photo assets concurrently', async () => {
+    client.action.mockResolvedValue({
+      threshold: 0.6,
+      matches: [1, 2, 3].map((index) => ({
+        photoId: `photo_1111111${index}`,
+        originalKey: `events/evt_11111111/photo_1111111${index}.jpg`,
+        thumbnail800Key: `events/evt_11111111/thumbs/800/photo_1111111${index}.jpg`,
+        width: 1200,
+        height: 800,
+        bbox: { x: 1, y: 2, width: 3, height: 4 },
+        score: 0.9,
+      })),
+    })
+    let active = 0
+    let maxActive = 0
+    createSignedR2UrlMock.mockImplementation(async (_env, key: string) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      active -= 1
+      return `https://signed.test/${key}`
+    })
+
+    const response = await app.fetch(matchRequest(), testEnv(), {
+      waitUntil: vi.fn(),
+    } as unknown as ExecutionContext)
+
+    expect(response.status).toBe(200)
+    expect(maxActive).toBeGreaterThan(2)
+  })
 })

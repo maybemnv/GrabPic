@@ -6,7 +6,7 @@ import { match } from './routes/match'
 import { upload } from './routes/upload'
 import { qr } from './routes/qr'
 import { modalCallback } from './routes/modal-callback'
-import { createLogger } from './lib/logger'
+import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
 import { createConvexClient } from './lib/convex'
@@ -43,7 +43,18 @@ export type AppContext = {
 
 const app = new Hono<AppContext>()
 
-app.use('/*', cors())
+const browserCors = cors({
+  origin: ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000'],
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+})
+
+app.use('/events', browserCors)
+app.use('/events/*', browserCors)
+app.use('/health', browserCors)
+app.use('/health/*', browserCors)
+app.use('/qr', browserCors)
+app.use('/qr/*', browserCors)
 
 app.use('*', async (c, next) => {
   const start = Date.now()
@@ -52,12 +63,15 @@ app.use('*', async (c, next) => {
   await next()
   const ms = Date.now() - start
   const log = c.get('logger')
-  log.info(`${c.req.method} ${c.req.url}`, { status: c.res.status, duration: ms })
+  log.info(`${c.req.method} ${sanitizeRequestPath(c.req.url)}`, {
+    status: c.res.status,
+    duration: ms,
+  })
 })
 
 app.onError((err, c) => {
   const sentry = c.get('sentry')
-  sentry.captureException(err, { path: c.req.url, method: c.req.method })
+  sentry.captureException(err, { path: sanitizeRequestPath(c.req.url), method: c.req.method })
   return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
 })
 

@@ -14,7 +14,10 @@ import app, { type Env } from '../apps/api/src/index'
 
 function testEnv(): Env {
   return {
-    PHOTOS: { delete: vi.fn(async () => undefined) } as unknown as R2Bucket,
+    PHOTOS: {
+      delete: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ objects: [], truncated: false })),
+    } as unknown as R2Bucket,
     R2_ENDPOINT: 'https://r2.example.test',
     R2_BUCKET: 'grabpic-test',
     R2_ACCESS_KEY_ID: 'access',
@@ -37,6 +40,43 @@ describe('Convex event routes', () => {
   beforeEach(() => {
     client.query.mockReset()
     client.mutation.mockReset()
+  })
+
+  it('returns explicit CORS headers for browser preflight from approved origins', async () => {
+    const response = await app.fetch(
+      new Request('https://api.test/events/evt_1234abcd/upload/confirm', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://grabpic.app',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization,content-type',
+        },
+      }),
+      testEnv(),
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://grabpic.app')
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Authorization')
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Content-Type')
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST')
+  })
+
+  it('does not apply browser CORS to the private Modal callback', async () => {
+    const response = await app.fetch(
+      new Request('https://api.test/internal/modal/results', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://grabpic.app',
+          'Access-Control-Request-Method': 'POST',
+        },
+      }),
+      testEnv(),
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    )
+
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
 
   it('creates an event without exposing a Convex identifier', async () => {

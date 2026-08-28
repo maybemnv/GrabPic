@@ -24,14 +24,3 @@ export async function hashOrganizerAuthorization(
   const token = authorization.slice('Bearer '.length)
   return token ? hashOrganizerToken(token) : null
 }
-
-export async function verifyOrganizerToken(
-  authorization: string | undefined,
-  expectedHash: unknown,
-): Promise<boolean> {
-  if (typeof expectedHash !== 'string' || expectedHash.length !== 64) return false
-  if (!authorization?.startsWith('Bearer ')) return false
-  const token = authorization.slice('Bearer '.length)
-  if (!token) return false
-  return (await hashOrganizerToken(token)) === expectedHash
-}
