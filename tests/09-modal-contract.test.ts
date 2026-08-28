@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { buildProcessingRequest, requestSelfieEmbedding } from '../apps/api/src/lib/modal'
+import {
+  buildProcessingRequest,
+  requestProcessingCancellation,
+  requestSelfieEmbedding,
+} from '../apps/api/src/lib/modal'
 
 describe('Modal processing contract', () => {
   it('sends stable event-scoped R2 object references', () => {
     expect(
-      buildProcessingRequest('evt_1', [{ id: 'photo_1', r2Key: 'events/evt_1/photo_1.jpg' }]),
+      buildProcessingRequest('job_1', 'evt_1', 2, [
+        { id: 'photo_1', r2Key: 'events/evt_1/photo_1.jpg' },
+      ]),
     ).toEqual({
+      job_id: 'job_1',
       event_id: 'evt_1',
+      attempt: 2,
       photos: [{ photo_id: 'photo_1', r2_key: 'events/evt_1/photo_1.jpg' }],
     })
   })
@@ -29,5 +37,21 @@ describe('Modal processing contract', () => {
         async () => Response.json({ embedding: [1, 2] }),
       ),
     ).rejects.toThrow('512-dimensional')
+  })
+
+  it('requires Modal to acknowledge cancellation', async () => {
+    await expect(
+      requestProcessingCancellation('https://modal.test/cancel', 'token', 'modal_1', async () =>
+        Response.json({ cancelled: true }),
+      ),
+    ).resolves.toBeUndefined()
+    await expect(
+      requestProcessingCancellation(
+        'https://modal.test/cancel',
+        'token',
+        'modal_1',
+        async () => new Response('failed', { status: 503 }),
+      ),
+    ).rejects.toThrow('cancellation failed')
   })
 })

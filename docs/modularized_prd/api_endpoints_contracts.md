@@ -203,43 +203,14 @@ Match selfie to event photos
 ```
 
 **Backend Logic:**
-```typescript
-// /api/routes/match.ts
-export async function matchSelfie(eventId: string, selfieBase64: string, threshold = 0.6) {
-  // 1. Generate embedding from selfie
-  const queryEmbedding = await generateEmbedding(selfieBase64)
 
-  // 2. Vector similarity search
-  const results = await db.execute(`
-    SELECT
-      f.id as face_id,
-      f.photo_id,
-      f.bbox,
-      vec_distance_cosine(fe.embedding, ?) as distance,
-      (1 - vec_distance_cosine(fe.embedding, ?)) as similarity
-    FROM faces f
-    JOIN face_embeddings fe ON f.id = fe.face_id
-    JOIN photos p ON f.photo_id = p.id
-    WHERE p.event_id = ?
-      AND (1 - vec_distance_cosine(fe.embedding, ?)) > ?
-    ORDER BY similarity DESC
-    LIMIT 100
-  `, [queryEmbedding, queryEmbedding, eventId, queryEmbedding, threshold])
-
-  // 3. Group by photo_id, get photo details
-  const photoIds = [...new Set(results.rows.map(r => r.photo_id))]
-  const photos = await getPhotoDetails(photoIds)
-
-  // 4. Return matched photos with CDN URLs
-  return photos.map(photo => ({
-    photoId: photo.id,
-    similarity: results.rows.find(r => r.photo_id === photo.id)?.similarity,
-    url: getR2SignedUrl(photo.r2_key),
-    thumbnailUrl: getR2SignedUrl(photo.thumbnail_800_key),
-    // ...
-  }))
-}
-```
+The Worker generates the selfie embedding through Modal, invokes the Convex
+matching action with the external event ID, and signs the returned R2 keys.
+The Convex action uses the server-owned threshold and a mandatory
+`eventId` equality filter on the 512-dimensional vector index. It requests at
+most 256 candidates, applies the inclusive threshold, keeps the best face per
+photo, and returns no more than 100 photos. Convex references and embeddings
+are never exposed in the API response.
 
 ---
 

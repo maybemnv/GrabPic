@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
-import { findMatches, resolveMatchThreshold } from '../lib/matching'
+import { createConvexClient, hasConvexError } from '../lib/convex'
 import { requestSelfieEmbedding } from '../lib/modal'
 import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
@@ -28,34 +29,6 @@ const matchSchema = z
     message: 'passcode or inviteToken is required',
   })
 
-function parseBbox(value: unknown): { x: number; y: number; width: number; height: number } | null {
-  let bbox = value
-  if (typeof bbox === 'string') {
-    try {
-      bbox = JSON.parse(bbox)
-    } catch {
-      return null
-    }
-  }
-
-  if (Array.isArray(bbox) && bbox.length === 4 && bbox.every((item) => typeof item === 'number')) {
-    const [x1, y1, x2, y2] = bbox
-    return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }
-  }
-
-  if (
-    bbox &&
-    typeof bbox === 'object' &&
-    ['x', 'y', 'width', 'height'].every(
-      (key) => typeof (bbox as Record<string, unknown>)[key] === 'number',
-    )
-  ) {
-    return bbox as { x: number; y: number; width: number; height: number }
-  }
-
-  return null
-}
-
 app.post('/', async (c) => {
   const eventId = c.req.param('eventId')
   const log = c.get('logger')
@@ -78,37 +51,18 @@ app.post('/', async (c) => {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
     }
 
-    const { selfieData } = parsed.data
-    const threshold = resolveMatchThreshold(c.env.MATCH_THRESHOLD)
-    const db = (await import('@libsql/client')).createClient({
-      url: c.env.TURSO_URL,
-      authToken: c.env.TURSO_TOKEN,
+    const { selfieData, passcode, inviteToken } = parsed.data
+    const access = {
+      eventPublicId: eventId,
+      ...(passcode ? { passcode } : {}),
+      ...(inviteToken ? { inviteToken } : {}),
+    }
+    const convex = createConvexClient(c.env)
+    await convex.query(api.matches.authorize, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      ...access,
+      now: Math.floor(Date.now() / 1000),
     })
-
-    const event = await db.execute({
-      sql: 'SELECT id, passcode, invite_token, status FROM events WHERE id = ?',
-      args: [eventId],
-    })
-
-    if (event.rows.length === 0) {
-      log.warn('match: event not found', { eventId })
-      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-    }
-
-    const eventRow = event.rows[0] as Record<string, unknown>
-    const authorizedByPasscode =
-      parsed.data.passcode && String(eventRow.passcode) === parsed.data.passcode
-    const authorizedByInvite =
-      parsed.data.inviteToken && String(eventRow.invite_token) === parsed.data.inviteToken
-    if (!authorizedByPasscode && !authorizedByInvite) {
-      log.warn('match: invalid passcode', { eventId })
-      return c.json({ error: 'Invalid passcode', code: 'UNAUTHORIZED' }, 401)
-    }
-
-    if (String(eventRow.status) !== 'ready') {
-      log.info('match: event not ready', { eventId, status: eventRow.status })
-      return c.json({ error: 'Event still processing', code: 'NOT_READY' }, 400)
-    }
 
     if (!c.env.MODAL_EMBEDDING_URL || !c.env.MODAL_TOKEN) {
       return c.json({ error: 'Matching service unavailable', code: 'MATCHING_UNAVAILABLE' }, 503)
@@ -126,84 +80,40 @@ app.post('/', async (c) => {
       return c.json({ error: 'Unable to process selfie', code: 'EMBEDDING_FAILED' }, 502)
     }
 
-    const photos = await db.execute({
-      sql: `SELECT p.id, p.r2_key, p.thumbnail_800_key, p.width, p.height, f.bbox, fe.embedding
-            FROM photos p
-            JOIN faces f ON f.photo_id = p.id
-            JOIN face_embeddings fe ON fe.face_id = f.id
-            WHERE p.event_id = ?`,
-      args: [eventId],
+    const search = await convex.action(api.matches.search, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      ...access,
+      now: Math.floor(Date.now() / 1000),
+      embedding: Array.from(selfieEmbedding),
     })
 
-    const faceRows = photos.rows.map((row) => {
-      const photo = row as Record<string, unknown>
-      return {
-        eventId,
-        photoId: String(photo.id),
-        embedding: photo.embedding,
-        bbox: parseBbox(photo.bbox),
-      }
-    })
-    const calculatedMatches = findMatches({
-      eventId,
-      selfieEmbedding,
-      threshold,
-      faces: faceRows,
-    })
-    const assets = new Map<string, Record<string, unknown>>()
-    for (const row of photos.rows) {
-      const photo = row as Record<string, unknown>
-      assets.set(String(photo.id), photo)
-    }
+    const matches = await Promise.all(
+      search.matches.map(async (match) => {
+        const [url, thumbnailUrl] = await Promise.all([
+          createSignedR2Url(c.env, match.originalKey, 'GET', 300),
+          createSignedR2Url(c.env, match.thumbnail800Key, 'GET', 300),
+        ])
 
-    const matches = []
-    for (const calculated of calculatedMatches) {
-      const photo = assets.get(calculated.photoId)
-      const r2Key = typeof photo?.r2_key === 'string' ? photo.r2_key : null
-      const thumbnailKey =
-        typeof photo?.thumbnail_800_key === 'string' ? photo.thumbnail_800_key : null
-      if (!r2Key || !thumbnailKey) continue
-      const [url, thumbnailUrl] = await Promise.all([
-        createSignedR2Url(c.env, r2Key, 'GET', 300),
-        createSignedR2Url(c.env, thumbnailKey, 'GET', 300),
-      ])
-
-      matches.push({
-        photoId: calculated.photoId,
-        similarity: calculated.similarity,
-        url,
-        thumbnailUrl,
-        width: Number(photo?.width) || 0,
-        height: Number(photo?.height) || 0,
-        faces: calculated.faces,
-      })
-    }
+        return {
+          photoId: match.photoId,
+          similarity: match.score,
+          url,
+          thumbnailUrl,
+          width: match.width ?? 0,
+          height: match.height ?? 0,
+          faces: [{ bbox: match.bbox, isMatch: true }],
+        }
+      }),
+    )
 
     const matchedCount = matches.length
     const processingTime = Date.now() - startTime
-    log.info('match: completed', { eventId, matchedCount, threshold, processingTime })
-
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          const sessionId = `ms_${crypto.randomUUID().slice(0, 8)}`
-          await db.execute({
-            sql: `INSERT INTO match_sessions (id, event_id, user_ip, matched_count, similarity_threshold, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [
-              sessionId,
-              eventId,
-              clientId,
-              matchedCount,
-              threshold,
-              Math.floor(Date.now() / 1000),
-            ],
-          })
-        } catch (trackError) {
-          log.error('match: failed to track session', { eventId, error: String(trackError) })
-        }
-      })(),
-    )
+    log.info('match: completed', {
+      eventId,
+      matchedCount,
+      threshold: search.threshold,
+      processingTime,
+    })
 
     return c.json({
       matches,
@@ -211,8 +121,18 @@ app.post('/', async (c) => {
       processingTime,
     })
   } catch (err) {
-    log.error('match: error', { eventId, error: String(err) })
-    sentry.captureException(err, { route: 'match', eventId })
+    if (hasConvexError(err, 'EVENT_NOT_FOUND')) {
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+    if (hasConvexError(err, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Invalid passcode', code: 'UNAUTHORIZED' }, 401)
+    }
+    if (hasConvexError(err, 'NOT_READY')) {
+      return c.json({ error: 'Event still processing', code: 'NOT_READY' }, 400)
+    }
+    // The failing operation may have handled a biometric vector; keep error payloads out of logs.
+    log.error('match: error', { eventId })
+    sentry.captureMessage('Match request failed', { route: 'match', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })

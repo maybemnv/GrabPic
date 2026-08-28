@@ -1,25 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { createClientMock } = vi.hoisted(() => ({ createClientMock: vi.fn() }))
+const { convexClient, createConvexClientMock } = vi.hoisted(() => {
+  const convexClient = { query: vi.fn(), mutation: vi.fn() }
+  return {
+    convexClient,
+    createConvexClientMock: vi.fn(() => convexClient),
+  }
+})
 
-vi.mock('@libsql/client', () => ({ createClient: createClientMock }))
+vi.mock('../apps/api/src/lib/convex', () => ({
+  createConvexClient: createConvexClientMock,
+  hasConvexError: (error: unknown, code: string) => String(error).includes(code),
+}))
 
 import app, { type Env } from '../apps/api/src/index'
-import { hashOrganizerToken } from '../apps/api/src/lib/organizer-auth'
 import { MAX_UPLOAD_BYTES } from '../apps/api/src/lib/upload'
-
-const eventRow = {
-  id: 'evt_1',
-  name: 'Private Event',
-  passcode: '123456',
-  invite_token: '0123456789abcdef0123456789abcdef',
-  organizer_token_hash: 'not-the-raw-token',
-  status: 'processing',
-  photo_count: 0,
-  face_count: 0,
-  created_at: 1,
-  expires_at: 9999999999,
-}
 
 function testEnv(): Env {
   return {
@@ -32,26 +27,24 @@ function testEnv(): Env {
     LOG_LEVEL: 'error',
     SENTRY_DSN: '',
     MODAL_TOKEN: '',
+    MODAL_CALLBACK_TOKEN: '',
     MODAL_WEBHOOK_URL: '',
+    MODAL_CANCEL_URL: '',
     MODAL_EMBEDDING_URL: '',
     MATCH_THRESHOLD: '0.6',
-    TURSO_URL: 'libsql://test.turso.io',
-    TURSO_TOKEN: 'token',
+    CONVEX_URL: 'https://convex.example.test',
+    CONVEX_SERVICE_SECRET: 'worker-secret',
   }
 }
 
 describe('organizer route authorization', () => {
   it('rejects attendee access to organizer event, upload, delete, and QR routes', async () => {
-    const db = {
-      execute: vi.fn(async (statement: string | { sql: string; args?: unknown[] }) => {
-        const sql = typeof statement === 'string' ? statement : statement.sql
-        if (sql.includes('SELECT * FROM events')) return { rows: [eventRow] }
-        if (sql.includes('organizer_token_hash FROM events')) return { rows: [eventRow] }
-        if (sql.includes('SELECT invite_token')) return { rows: [eventRow] }
-        return { rows: [] }
-      }),
-    }
-    createClientMock.mockReturnValue(db)
+    convexClient.query.mockReset().mockResolvedValueOnce(null).mockResolvedValue({
+      status: 'processing',
+      photoCount: 0,
+      maxPhotos: 100,
+      hasProcessingJob: false,
+    })
 
     const requests = [
       new Request('https://api.test/events/evt_1'),
@@ -73,21 +66,12 @@ describe('organizer route authorization', () => {
   })
 
   it('checks the global upload bucket and actual R2 size before accepting a batch', async () => {
-    const organizerTokenHash = await hashOrganizerToken('organizer-secret')
-    const db = {
-      execute: vi.fn(async (statement: string | { sql: string }) => {
-        const sql = typeof statement === 'string' ? statement : statement.sql
-        const eventId = typeof statement === 'string' ? '' : String(statement.args?.[0] ?? '')
-        if (sql.includes('organizer_token_hash FROM events')) {
-          if (eventId === 'missing') return { rows: [] }
-          return {
-            rows: [{ ...eventRow, organizer_token_hash: organizerTokenHash }],
-          }
-        }
-        return { rows: [], rowsAffected: 0 }
-      }),
-    }
-    createClientMock.mockReturnValue(db)
+    convexClient.query.mockReset().mockResolvedValueOnce(null).mockResolvedValue({
+      status: 'processing',
+      photoCount: 0,
+      maxPhotos: 100,
+      hasProcessingJob: false,
+    })
     const limit = vi.fn(async () => ({ success: true }))
     const head = vi.fn(async () => ({ size: MAX_UPLOAD_BYTES + 1 }))
     const remove = vi.fn(async () => undefined)

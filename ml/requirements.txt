@@ -5,6 +5,4 @@ torch
 torchvision
 pillow
 scikit-learn
-requests
-libsql-client
 numpy

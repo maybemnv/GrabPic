@@ -1,97 +1,54 @@
-# GrabPic - Technical Architecture
+# GrabPic Technical Architecture
 
-**Version:** 1.0
-**Date:** February 9, 2026
-**Owner:** Product Engineering
-**Status:** Planning Phase
+This document describes the current production path. The approved migration
+keeps the public edge boundary and replaces the application database with
+Convex.
 
----
-
-## System Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENT LAYER                             │
-├─────────────────────────────────────────────────────────────────┤
-│  Next.js Frontend (Vercel)                                       │
-│  ├─ Organizer Dashboard (upload, manage events)                 │
-│  ├─ Attendee Portal (selfie, gallery)                           │
-│  └─ Camera Integration (WebRTC, MediaDevices API)               │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ HTTPS/REST
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       API LAYER (Edge)                           │
-├─────────────────────────────────────────────────────────────────┤
-│  Cloudflare Workers / Hono.js                                    │
-│  ├─ POST /events (create event)                                 │
-│  ├─ POST /events/:id/upload (signed URLs)                       │
-│  ├─ POST /events/:id/match (selfie matching)                    │
-│  ├─ GET /events/:id/photos (retrieve matches)                   │
-│  └─ Authentication & Rate Limiting                              │
-└────────────┬───────────────────────┬────────────────────────────┘
-             │                       │
-             ▼                       ▼
-┌─────────────────────┐   ┌──────────────────────────────────────┐
-│   STORAGE LAYER     │   │      PROCESSING LAYER                │
-├─────────────────────┤   ├──────────────────────────────────────┤
-│ Cloudflare R2       │   │ Modal.com (GPU Serverless)           │
-│ - Original Photos   │   │ ├─ Face Detection (MTCNN/RetinaFace) │
-│ - Thumbnails        │   │ ├─ Embedding Gen (FaceNet vggface2)   │
-│ - CDN Delivery      │   │ └─ Clustering (DBSCAN)               │
-│                     │   │                                       │
-│ Cost: $0.015/GB     │   │ Cost: $0.10/min GPU                  │
-└─────────────────────┘   └───────────┬──────────────────────────┘
-                                      │
-                                      ▼
-                          ┌────────────────────────────┐
-                          │    DATABASE LAYER          │
-                          ├────────────────────────────┤
-                          │ Turso (SQLite + Vector)    │
-                          │                            │
-                          │ Tables:                    │
-                          │ ├─ events                  │
-                          │ ├─ photos                  │
-                          │ ├─ faces                   │
-                          │ └─ face_embeddings (vector)│
-                          │                            │
-                          │ Vector Extension:          │
-                          │ - sqlite-vss               │
-                          │ - Cosine similarity search │
-                          └────────────────────────────┘
+```mermaid
+flowchart LR
+  WEB[Next.js] --> API[Cloudflare Worker / Hono]
+  API --> DB[Convex]
+  API --> R2[Cloudflare R2]
+  API --> M[Modal GPU]
+  M --> R2
+  M -->|authenticated result callback| API
 ```
 
-## Data Flow
+## Upload and processing
 
+```text
+Organizer -> Worker: create event and request signed uploads
+Organizer -> R2: upload originals
+Organizer -> Worker: confirm upload
+Worker -> Convex: atomic photo/job mutation
+Worker -> Modal: request processing; require accepted job ID
+Modal -> R2: read originals and write 200px/800px thumbnails
+Modal -> Worker: authenticated batches of at most 25 faces
+Worker -> Convex: validate and persist metadata/512-d vectors
+Convex -> Worker: ready state after final callback
 ```
-UPLOAD FLOW:
-User uploads photos → R2 signed URL → Photos stored
-                                    ↓
-                          Trigger Modal job (webhook)
-                                    ↓
-                     ┌─ Detect faces (MTCNN)
-                     ├─ Generate embeddings (FaceNet)
-                     ├─ Cluster faces (DBSCAN)
-                     └─ Store in Turso with photo_id mapping
-                                    ↓
-                           Event status: READY
 
-MATCH FLOW:
-User takes selfie → Extract embedding (client-side ONNX or edge)
-                                    ↓
-                    Send to /events/:id/match endpoint
-                                    ↓
-                    Vector similarity search (Turso)
-                    SELECT photo_id, similarity
-                    FROM face_embeddings
-                    WHERE event_id = ?
-                    ORDER BY vec_distance(embedding, ?)
-                    LIMIT 50
-                                    ↓
-                    Filter by threshold (>0.6 similarity)
-                                    ↓
-                    Return signed R2 URLs for matched photos
-                                    ↓
-                    Client displays gallery
+Modal never writes Convex directly. Callback bodies, embeddings, and service
+secrets are excluded from logs and analytics.
+
+## Matching
+
+```text
+Attendee -> Worker: selfie and event credential
+Worker -> Modal: pinned-model selfie embedding
+Worker -> Convex: event-filtered vector search, limit 256
+Worker -> R2: sign original and 800px thumbnail keys
+Worker -> Attendee: matched gallery
 ```
+
+Every face stores its event reference and the vector index requires equality
+filtering on that event. The Worker applies the server-owned threshold and
+deduplicates results by photo. The 256-candidate ceiling remains an explicit
+acceptance risk.
+
+## Deletion and expiry
+
+The scheduled Worker marks an event `deleting`, cancels Modal work, deletes all
+R2 originals and thumbnails, and asks Convex to purge faces, match sessions,
+processing jobs, photos, and the event in batches of 500. The event is deleted
+last. Failures record sanitized retry state; delayed callbacks are rejected.

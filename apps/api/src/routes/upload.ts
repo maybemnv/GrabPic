@@ -1,9 +1,14 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
-import { buildProcessingRequest } from '../lib/modal'
-import { claimProcessingBatch } from '../lib/processing'
-import { verifyOrganizerToken } from '../lib/organizer-auth'
+import { createConvexClient, hasConvexError } from '../lib/convex'
+import {
+  buildProcessingRequest,
+  requestProcessingAcceptance,
+  requestProcessingCancellation,
+} from '../lib/modal'
+import { hashOrganizerAuthorization } from '../lib/organizer-auth'
 import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
 import { isValidUploadedSize, MAX_UPLOAD_BYTES, photoObjectKey } from '../lib/upload'
@@ -49,25 +54,20 @@ app.post('/', async (c) => {
       return c.json({ error: 'Too many upload requests', code: 'RATE_LIMITED' }, 429)
     }
 
-    const db = (await import('@libsql/client')).createClient({
-      url: c.env.TURSO_URL,
-      authToken: c.env.TURSO_TOKEN,
-    })
-    const eventResult = await db.execute({
-      sql: 'SELECT id, status, expires_at, processing_batch_id, organizer_token_hash FROM events WHERE id = ?',
-      args: [eventId],
-    })
-    if (eventResult.rows.length === 0) {
-      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-    }
-    const event = eventResult.rows[0] as Record<string, unknown>
-    if (!(await verifyOrganizerToken(c.req.header('authorization'), event.organizer_token_hash))) {
+    const organizerTokenHash = await hashOrganizerAuthorization(c.req.header('authorization'))
+    if (!organizerTokenHash) {
       return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
     }
-    if (Number(event.expires_at) <= Math.floor(Date.now() / 1000) || event.status === 'expired') {
-      return c.json({ error: 'Event expired', code: 'EXPIRED' }, 410)
+    const event = await createConvexClient(c.env).query(api.events.getUploadState, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      publicId: eventId,
+      organizerTokenHash,
+      now: Math.floor(Date.now() / 1000),
+    })
+    if (!event) {
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
     }
-    if (event.status !== 'processing' || event.processing_batch_id) {
+    if (event.status !== 'processing' || event.hasProcessingJob) {
       return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
     }
 
@@ -78,6 +78,9 @@ app.post('/', async (c) => {
     }
 
     const { photos } = parsed.data
+    if (event.photoCount + photos.length > event.maxPhotos) {
+      return c.json({ error: 'Event photo limit exceeded', code: 'MAX_PHOTOS_EXCEEDED' }, 409)
+    }
     const uploadUrls = await Promise.all(
       photos.map(async (photo) => {
         const photoId = `photo_${crypto.randomUUID().slice(0, 8)}`
@@ -92,6 +95,15 @@ app.post('/', async (c) => {
     log.info('upload: urls generated', { eventId, count: photos.length })
     return c.json({ uploadUrls })
   } catch (err) {
+    if (hasConvexError(err, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+    if (hasConvexError(err, 'EVENT_EXPIRED')) {
+      return c.json({ error: 'Event expired', code: 'EXPIRED' }, 410)
+    }
+    if (hasConvexError(err, 'EVENT_DELETING')) {
+      return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
+    }
     log.error('upload: generate urls error', { eventId, error: String(err) })
     sentry.captureException(err, { route: 'generateUploadUrls', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
@@ -116,26 +128,9 @@ app.post('/confirm', async (c) => {
       return c.json({ error: 'Too many upload requests', code: 'RATE_LIMITED' }, 429)
     }
 
-    const db = (await import('@libsql/client')).createClient({
-      url: c.env.TURSO_URL,
-      authToken: c.env.TURSO_TOKEN,
-    })
-    const eventResult = await db.execute({
-      sql: 'SELECT id, status, expires_at, processing_batch_id, organizer_token_hash FROM events WHERE id = ?',
-      args: [eventId],
-    })
-    if (eventResult.rows.length === 0) {
-      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-    }
-    const event = eventResult.rows[0] as Record<string, unknown>
-    if (!(await verifyOrganizerToken(c.req.header('authorization'), event.organizer_token_hash))) {
+    const organizerTokenHash = await hashOrganizerAuthorization(c.req.header('authorization'))
+    if (!organizerTokenHash) {
       return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
-    }
-    if (Number(event.expires_at) <= Math.floor(Date.now() / 1000) || event.status === 'expired') {
-      return c.json({ error: 'Event expired', code: 'EXPIRED' }, 410)
-    }
-    if (event.status !== 'processing' || event.processing_batch_id) {
-      return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
     }
 
     const parsed = confirmUploadSchema.safeParse(await c.req.json())
@@ -143,6 +138,23 @@ app.post('/confirm', async (c) => {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
     }
     const { photoIds } = parsed.data
+    const now = Math.floor(Date.now() / 1000)
+    const convex = createConvexClient(c.env)
+    const event = await convex.query(api.events.getUploadState, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      publicId: eventId,
+      organizerTokenHash,
+      now,
+    })
+    if (!event) {
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+    if (event.status !== 'processing' && event.status !== 'failed') {
+      return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
+    }
+    if (!event.hasProcessingJob && event.photoCount + photoIds.length > event.maxPhotos) {
+      return c.json({ error: 'Event photo limit exceeded', code: 'MAX_PHOTOS_EXCEEDED' }, 409)
+    }
 
     const uploads = await Promise.all(
       photoIds.map(async (photoId) => {
@@ -169,62 +181,122 @@ app.post('/confirm', async (c) => {
       )
     }
 
-    const batchId = `job_${crypto.randomUUID()}`
-    if (!(await claimProcessingBatch(db, eventId, batchId))) {
-      return c.json(
-        { error: 'Event upload processing has already started', code: 'UPLOADS_CLOSED' },
-        409,
-      )
-    }
-
-    const now = Math.floor(Date.now() / 1000)
-
-    for (const { photoId, key, object } of uploads) {
-      await db.execute({
-        sql: `INSERT INTO photos (id, event_id, r2_key, uploaded_at, file_size)
-              VALUES (?, ?, ?, ?, ?)`,
-        args: [photoId, eventId, key, now, object!.size],
-      })
-    }
-
-    await db.execute({
-      sql: 'UPDATE events SET photo_count = photo_count + ? WHERE id = ?',
-      args: [photoIds.length, eventId],
+    const confirmation = await convex.mutation(api.uploads.confirm, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      eventPublicId: eventId,
+      organizerTokenHash,
+      jobPublicId: `job_${crypto.randomUUID()}`,
+      now,
+      photos: uploads.map(({ photoId, key, object }) => ({
+        publicId: photoId,
+        originalKey: key,
+        fileSize: object!.size,
+      })),
     })
 
-    if (c.env.MODAL_WEBHOOK_URL && c.env.MODAL_TOKEN) {
-      const processingRequest = buildProcessingRequest(
+    if (!confirmation.shouldDispatch) {
+      if (!confirmation.modalJobId) {
+        return c.json(
+          { error: 'Event upload processing is pending', code: 'PROCESSING_PENDING' },
+          409,
+        )
+      }
+      return c.json({ status: 'processing', jobId: confirmation.jobId, estimatedTime: 120 }, 202)
+    }
+
+    const processingRequest = buildProcessingRequest(
+      confirmation.jobId,
+      eventId,
+      confirmation.attempt,
+      uploads.map(({ photoId, key }) => ({ id: photoId, r2Key: key })),
+    )
+    let modalJobId: string
+    try {
+      modalJobId = await requestProcessingAcceptance(
+        c.env.MODAL_WEBHOOK_URL,
+        c.env.MODAL_TOKEN,
+        processingRequest,
+      )
+    } catch (modalError) {
+      await convex.mutation(api.processing.markDispatchFailed, {
+        serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+        eventPublicId: eventId,
+        jobPublicId: confirmation.jobId,
+        attempt: confirmation.attempt,
+        sanitizedError: 'Modal did not accept the processing request',
+        now: Math.floor(Date.now() / 1000),
+      })
+      sentry.captureException(modalError, {
+        route: 'modalWebhook',
         eventId,
-        uploads.map(({ photoId, key }) => ({ id: photoId, r2Key: key })),
+        jobId: confirmation.jobId,
+      })
+      return c.json(
+        { error: 'Processing service unavailable', code: 'PROCESSING_TRIGGER_FAILED' },
+        502,
       )
-      c.executionCtx.waitUntil(
-        fetch(c.env.MODAL_WEBHOOK_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${c.env.MODAL_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(processingRequest),
+    }
+
+    try {
+      await convex.mutation(api.processing.markAccepted, {
+        serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+        eventPublicId: eventId,
+        jobPublicId: confirmation.jobId,
+        attempt: confirmation.attempt,
+        modalJobId,
+        now: Math.floor(Date.now() / 1000),
+      })
+    } catch (acceptError) {
+      try {
+        await requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId)
+        await convex.mutation(api.deletion.markModalCancelled, {
+          serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+          eventPublicId: eventId,
+          now: Math.floor(Date.now() / 1000),
         })
-          .then((response) => {
-            if (!response.ok) throw new Error(`Modal processing failed with ${response.status}`)
-          })
-          .catch((modalErr) => {
-            sentry.captureException(modalErr, { route: 'modalWebhook', eventId })
-          }),
-      )
+      } catch {
+        log.error('upload: accepted Modal job compensation failed', {
+          eventId,
+          jobId: confirmation.jobId,
+        })
+        sentry.captureMessage('Accepted Modal job compensation failed', {
+          route: 'modalWebhook',
+          eventId,
+          jobId: confirmation.jobId,
+        })
+      }
+      throw acceptError
     }
 
     log.info('upload: confirmed', { eventId, photoCount: photoIds.length })
     return c.json(
       {
         status: 'processing',
-        jobId: batchId,
+        jobId: confirmation.jobId,
         estimatedTime: 120,
       },
       202,
     )
   } catch (err) {
+    if (hasConvexError(err, 'EVENT_NOT_FOUND')) {
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+    if (hasConvexError(err, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+    if (hasConvexError(err, 'EVENT_EXPIRED')) {
+      return c.json({ error: 'Event expired', code: 'EXPIRED' }, 410)
+    }
+    if (
+      hasConvexError(err, 'EVENT_DELETING') ||
+      hasConvexError(err, 'UPLOADS_CLOSED') ||
+      hasConvexError(err, 'PHOTO_CONFIRMATION_CONFLICT')
+    ) {
+      return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
+    }
+    if (hasConvexError(err, 'MAX_PHOTOS_EXCEEDED')) {
+      return c.json({ error: 'Event photo limit exceeded', code: 'MAX_PHOTOS_EXCEEDED' }, 409)
+    }
     log.error('upload: confirm error', { eventId, error: String(err) })
     sentry.captureException(err, { route: 'confirmUpload', eventId })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
