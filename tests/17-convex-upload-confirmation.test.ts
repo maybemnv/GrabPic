@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { client, createConvexClientMock } = vi.hoisted(() => {
+const { client, createConvexClientMock, requestProcessingCancellationMock } = vi.hoisted(() => {
   const client = {
     query: vi.fn(),
     mutation: vi.fn(),
@@ -8,6 +8,7 @@ const { client, createConvexClientMock } = vi.hoisted(() => {
   return {
     client,
     createConvexClientMock: vi.fn(() => client),
+    requestProcessingCancellationMock: vi.fn(async () => undefined),
   }
 })
 
@@ -15,6 +16,13 @@ vi.mock('../apps/api/src/lib/convex', () => ({
   createConvexClient: createConvexClientMock,
   hasConvexError: (error: unknown, code: string) => String(error).includes(code),
 }))
+
+vi.mock('../apps/api/src/lib/modal', async () => {
+  const actual = await vi.importActual<typeof import('../apps/api/src/lib/modal')>(
+    '../apps/api/src/lib/modal',
+  )
+  return { ...actual, requestProcessingCancellation: requestProcessingCancellationMock }
+})
 
 import app, { type Env } from '../apps/api/src/index'
 
@@ -63,6 +71,7 @@ describe('Convex upload confirmation', () => {
     })
     client.mutation.mockReset()
     createConvexClientMock.mockClear()
+    requestProcessingCancellationMock.mockReset().mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -71,7 +80,7 @@ describe('Convex upload confirmation', () => {
 
   it('returns 202 only after Modal accepts and returns a real job identifier', async () => {
     client.mutation
-      .mockResolvedValueOnce({ jobId: 'job_1', shouldDispatch: true })
+      .mockResolvedValueOnce({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
       .mockResolvedValueOnce({ accepted: true })
     const modalFetch = vi.fn(async () => Response.json({ job_id: 'modal_1' }, { status: 202 }))
     vi.stubGlobal('fetch', modalFetch)
@@ -93,7 +102,7 @@ describe('Convex upload confirmation', () => {
 
   it('returns 502 and retains a retryable job when Modal rejects the request', async () => {
     client.mutation
-      .mockResolvedValueOnce({ jobId: 'job_1', shouldDispatch: true })
+      .mockResolvedValueOnce({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
       .mockResolvedValueOnce({ recorded: true })
     vi.stubGlobal(
       'fetch',
@@ -119,6 +128,7 @@ describe('Convex upload confirmation', () => {
   it('does not dispatch Modal again for an already accepted confirmation', async () => {
     client.mutation.mockResolvedValueOnce({
       jobId: 'job_1',
+      attempt: 1,
       modalJobId: 'modal_1',
       shouldDispatch: false,
     })
@@ -155,7 +165,7 @@ describe('Convex upload confirmation', () => {
       hasProcessingJob: true,
     })
     client.mutation
-      .mockResolvedValueOnce({ jobId: 'job_1', shouldDispatch: true })
+      .mockResolvedValueOnce({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
       .mockResolvedValueOnce({ accepted: true })
     vi.stubGlobal(
       'fetch',
@@ -168,5 +178,25 @@ describe('Convex upload confirmation', () => {
 
     expect(response.status).toBe(202)
     expect(client.mutation).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels an accepted Modal job if Convex acceptance persistence races deletion', async () => {
+    client.mutation
+      .mockResolvedValueOnce({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
+      .mockRejectedValueOnce(new Error('EVENT_DELETING'))
+    const modalFetch = vi.fn(async () => Response.json({ job_id: 'modal_1' }, { status: 202 }))
+    vi.stubGlobal('fetch', modalFetch)
+
+    const response = await app.fetch(confirmationRequest(), testEnv(), {
+      waitUntil: vi.fn(),
+    } as unknown as ExecutionContext)
+
+    expect(response.status).toBe(409)
+    expect(modalFetch).toHaveBeenCalledOnce()
+    expect(requestProcessingCancellationMock).toHaveBeenCalledWith(
+      'https://modal.test/cancel',
+      'modal-token',
+      'modal_1',
+    )
   })
 })

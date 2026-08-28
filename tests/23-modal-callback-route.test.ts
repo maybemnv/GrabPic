@@ -38,6 +38,7 @@ function callbackBody(faceCount = 1) {
     status: 'success',
     jobId: 'job_1',
     eventId: 'evt_1234abcd',
+    attempt: 1,
     final: false,
     photos: [
       {
@@ -104,6 +105,7 @@ describe('private Modal callback', () => {
       serviceSecret: 'worker-secret',
       eventPublicId: 'evt_1234abcd',
       jobPublicId: 'job_1',
+      attempt: 1,
       final: false,
     })
     expect(client.mutation.mock.calls[0][1].faces).toHaveLength(1)

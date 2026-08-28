@@ -5,6 +5,7 @@ import { requireServiceSecret } from './lib/validation'
 
 const confirmationResult = v.object({
   jobId: v.string(),
+  attempt: v.number(),
   modalJobId: v.optional(v.string()),
   shouldDispatch: v.boolean(),
 })
@@ -82,9 +83,11 @@ export const confirm = mutation({
           removedFaces += faces.length
           await ctx.db.patch(photo!._id, { processingState: 'pending', faceCount: 0 })
         }
+        const attempt = existingJob.attempts + 1
         await ctx.db.patch(existingJob._id, {
           status: 'pending',
-          attempts: existingJob.attempts + 1,
+          attempts: attempt,
+          modalJobId: undefined,
           sanitizedError: undefined,
           updatedAt: args.now,
         })
@@ -92,10 +95,11 @@ export const confirm = mutation({
           status: 'processing',
           faceCount: Math.max(0, event.faceCount - removedFaces),
         })
-        return { jobId: existingJob.publicId, shouldDispatch: true }
+        return { jobId: existingJob.publicId, attempt, shouldDispatch: true }
       }
       return {
         jobId: existingJob.publicId,
+        attempt: existingJob.attempts,
         ...(existingJob.modalJobId ? { modalJobId: existingJob.modalJobId } : {}),
         shouldDispatch: false,
       }
@@ -137,6 +141,6 @@ export const confirm = mutation({
     })
     await ctx.db.patch(event._id, { photoCount: event.photoCount + photoIds.length })
 
-    return { jobId: args.jobPublicId, shouldDispatch: true }
+    return { jobId: args.jobPublicId, attempt: 1, shouldDispatch: true }
   },
 })

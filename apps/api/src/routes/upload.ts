@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
 import { createConvexClient, hasConvexError } from '../lib/convex'
-import { buildProcessingRequest, requestProcessingAcceptance } from '../lib/modal'
+import {
+  buildProcessingRequest,
+  requestProcessingAcceptance,
+  requestProcessingCancellation,
+} from '../lib/modal'
 import { hashOrganizerAuthorization } from '../lib/organizer-auth'
 import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
@@ -203,6 +207,7 @@ app.post('/confirm', async (c) => {
     const processingRequest = buildProcessingRequest(
       confirmation.jobId,
       eventId,
+      confirmation.attempt,
       uploads.map(({ photoId, key }) => ({ id: photoId, r2Key: key })),
     )
     let modalJobId: string
@@ -217,6 +222,7 @@ app.post('/confirm', async (c) => {
         serviceSecret: c.env.CONVEX_SERVICE_SECRET,
         eventPublicId: eventId,
         jobPublicId: confirmation.jobId,
+        attempt: confirmation.attempt,
         sanitizedError: 'Modal did not accept the processing request',
         now: Math.floor(Date.now() / 1000),
       })
@@ -231,13 +237,31 @@ app.post('/confirm', async (c) => {
       )
     }
 
-    await convex.mutation(api.processing.markAccepted, {
-      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
-      eventPublicId: eventId,
-      jobPublicId: confirmation.jobId,
-      modalJobId,
-      now: Math.floor(Date.now() / 1000),
-    })
+    try {
+      await convex.mutation(api.processing.markAccepted, {
+        serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+        eventPublicId: eventId,
+        jobPublicId: confirmation.jobId,
+        attempt: confirmation.attempt,
+        modalJobId,
+        now: Math.floor(Date.now() / 1000),
+      })
+    } catch (acceptError) {
+      try {
+        await requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId)
+      } catch {
+        log.error('upload: accepted Modal job compensation failed', {
+          eventId,
+          jobId: confirmation.jobId,
+        })
+        sentry.captureMessage('Accepted Modal job compensation failed', {
+          route: 'modalWebhook',
+          eventId,
+          jobId: confirmation.jobId,
+        })
+      }
+      throw acceptError
+    }
 
     log.info('upload: confirmed', { eventId, photoCount: photoIds.length })
     return c.json(

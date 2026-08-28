@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
 import { createConvexClient, hasConvexError } from '../lib/convex'
+import { timingSafeEqual } from '../lib/secure-compare'
 
 const photoSchema = z.object({
   photoId: z.string().min(1).max(200),
@@ -46,6 +47,7 @@ const successSchema = z.object({
   status: z.literal('success'),
   jobId: z.string().min(1).max(200),
   eventId: z.string().min(1).max(200),
+  attempt: z.number().int().positive(),
   final: z.boolean(),
   photos: z.array(photoSchema).max(1000),
   faces: z.array(faceSchema).max(25),
@@ -55,6 +57,7 @@ const failureSchema = z.object({
   status: z.literal('failed'),
   jobId: z.string().min(1).max(200),
   eventId: z.string().min(1).max(200),
+  attempt: z.number().int().positive(),
 })
 
 const callbackSchema = z.discriminatedUnion('status', [successSchema, failureSchema])
@@ -63,7 +66,7 @@ const app = new Hono<AppContext>()
 app.post('/results', async (c) => {
   if (
     !c.env.MODAL_CALLBACK_TOKEN ||
-    c.req.header('authorization') !== `Bearer ${c.env.MODAL_CALLBACK_TOKEN}`
+    !timingSafeEqual(c.req.header('authorization') ?? '', `Bearer ${c.env.MODAL_CALLBACK_TOKEN}`)
   ) {
     return c.json({ error: 'Callback authorization required', code: 'UNAUTHORIZED' }, 401)
   }
@@ -87,6 +90,7 @@ app.post('/results', async (c) => {
         serviceSecret: c.env.CONVEX_SERVICE_SECRET,
         eventPublicId: parsed.data.eventId,
         jobPublicId: parsed.data.jobId,
+        attempt: parsed.data.attempt,
         sanitizedError: 'Modal processing failed',
         now,
       })
@@ -97,6 +101,7 @@ app.post('/results', async (c) => {
       serviceSecret: c.env.CONVEX_SERVICE_SECRET,
       eventPublicId: parsed.data.eventId,
       jobPublicId: parsed.data.jobId,
+      attempt: parsed.data.attempt,
       final: parsed.data.final,
       now,
       photos: parsed.data.photos.map((photo) => ({

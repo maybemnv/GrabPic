@@ -4,7 +4,12 @@ import type { MutationCtx } from './_generated/server'
 import { eventByPublicId } from './lib/events'
 import { requireServiceSecret, validateNormalizedEmbedding } from './lib/validation'
 
-async function getJob(ctx: MutationCtx, eventPublicId: string, jobPublicId: string) {
+async function getJob(
+  ctx: MutationCtx,
+  eventPublicId: string,
+  jobPublicId: string,
+  attempt?: number,
+) {
   const event = await eventByPublicId(ctx, eventPublicId)
   if (!event) throw new Error('EVENT_NOT_FOUND')
   if (event.status === 'deleting') throw new Error('EVENT_DELETING')
@@ -13,6 +18,7 @@ async function getJob(ctx: MutationCtx, eventPublicId: string, jobPublicId: stri
     .withIndex('by_public_id', (query) => query.eq('publicId', jobPublicId))
     .unique()
   if (!job || job.eventId !== event._id) throw new Error('JOB_NOT_FOUND')
+  if (attempt !== undefined && job.attempts !== attempt) throw new Error('STALE_JOB')
   return { event, job }
 }
 
@@ -21,6 +27,7 @@ export const markAccepted = mutation({
     serviceSecret: v.string(),
     eventPublicId: v.string(),
     jobPublicId: v.string(),
+    attempt: v.number(),
     modalJobId: v.string(),
     now: v.number(),
   },
@@ -28,7 +35,8 @@ export const markAccepted = mutation({
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     if (!args.modalJobId || args.modalJobId.length > 200) throw new Error('INVALID_MODAL_JOB_ID')
-    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId)
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
     if (job.modalJobId && job.modalJobId !== args.modalJobId) throw new Error('STALE_JOB')
     if (job.status === 'complete' || job.status === 'cancelled') throw new Error('STALE_JOB')
     await ctx.db.patch(job._id, {
@@ -47,13 +55,15 @@ export const markDispatchFailed = mutation({
     serviceSecret: v.string(),
     eventPublicId: v.string(),
     jobPublicId: v.string(),
+    attempt: v.number(),
     sanitizedError: v.string(),
     now: v.number(),
   },
   returns: v.object({ recorded: v.boolean() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId)
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
     if (job.modalJobId || job.status === 'accepted' || job.status === 'processing') {
       return { recorded: false }
     }
@@ -98,6 +108,7 @@ export const persistResults = mutation({
     serviceSecret: v.string(),
     eventPublicId: v.string(),
     jobPublicId: v.string(),
+    attempt: v.number(),
     final: v.boolean(),
     now: v.number(),
     photos: v.array(
@@ -128,7 +139,8 @@ export const persistResults = mutation({
   }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId)
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
     if (!['accepted', 'processing', 'complete'].includes(job.status)) throw new Error('STALE_JOB')
     if (args.faces.length > 25) throw new Error('TOO_MANY_FACES')
     if (new Set(args.photos.map((photo) => photo.publicId)).size !== args.photos.length) {
@@ -137,6 +149,7 @@ export const persistResults = mutation({
     if (new Set(args.faces.map((face) => face.publicId)).size !== args.faces.length) {
       throw new Error('DUPLICATE_FACES')
     }
+    const batchPhotoIds = new Set(args.photos.map((photo) => photo.publicId))
 
     const jobPhotos = await Promise.all(job.photoIds.map((photoId) => ctx.db.get(photoId)))
     if (jobPhotos.some((photo) => !photo || photo.eventId !== event._id)) {
@@ -162,6 +175,7 @@ export const persistResults = mutation({
       }
     }
     for (const face of args.faces) {
+      if (!batchPhotoIds.has(face.photoPublicId)) throw new Error('PHOTO_NOT_IN_JOB')
       if (!photosByPublicId.has(face.photoPublicId)) throw new Error('PHOTO_NOT_IN_JOB')
       if (!face.publicId || face.publicId.length > 200) throw new Error('INVALID_FACE_ID')
       if (!finiteBox(face.bbox)) throw new Error('INVALID_BBOX')
@@ -251,13 +265,15 @@ export const markProcessingFailed = mutation({
     serviceSecret: v.string(),
     eventPublicId: v.string(),
     jobPublicId: v.string(),
+    attempt: v.number(),
     sanitizedError: v.string(),
     now: v.number(),
   },
   returns: v.object({ recorded: v.boolean() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId)
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
     if (job.status === 'complete' || job.status === 'cancelled') throw new Error('STALE_JOB')
     await ctx.db.patch(job._id, {
       status: 'failed',

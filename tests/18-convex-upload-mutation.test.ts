@@ -63,6 +63,7 @@ describe('Convex upload confirmation mutation', () => {
       serviceSecret,
       eventPublicId: 'evt_1234abcd',
       jobPublicId: first.jobId,
+      attempt: first.attempt,
       modalJobId: 'modal_1',
       now: 1_700_000_101,
     })
@@ -71,7 +72,7 @@ describe('Convex upload confirmation mutation', () => {
       jobPublicId: 'job_2',
     })
 
-    expect(first).toMatchObject({ jobId: 'job_1', shouldDispatch: true })
+    expect(first).toMatchObject({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
     expect(duplicate).toMatchObject({
       jobId: 'job_1',
       modalJobId: 'modal_1',
@@ -120,6 +121,7 @@ describe('Convex upload confirmation mutation', () => {
       serviceSecret,
       eventPublicId: 'evt_1234abcd',
       jobPublicId: first.jobId,
+      attempt: first.attempt,
       sanitizedError: 'Modal did not accept the processing request',
       now: 1_700_000_101,
     })
@@ -129,7 +131,7 @@ describe('Convex upload confirmation mutation', () => {
       jobPublicId: 'job_2',
     })
 
-    expect(retry).toEqual({ jobId: 'job_1', shouldDispatch: true })
+    expect(retry).toEqual({ jobId: 'job_1', attempt: 2, shouldDispatch: true })
     const jobs = await t.run(async (ctx) => await ctx.db.query('processingJobs').collect())
     expect(jobs).toHaveLength(1)
     expect(jobs[0]).toMatchObject({ status: 'pending', attempts: 2 })

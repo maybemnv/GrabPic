@@ -8,12 +8,13 @@ import {
 describe('Modal processing contract', () => {
   it('sends stable event-scoped R2 object references', () => {
     expect(
-      buildProcessingRequest('job_1', 'evt_1', [
+      buildProcessingRequest('job_1', 'evt_1', 2, [
         { id: 'photo_1', r2Key: 'events/evt_1/photo_1.jpg' },
       ]),
     ).toEqual({
       job_id: 'job_1',
       event_id: 'evt_1',
+      attempt: 2,
       photos: [{ photo_id: 'photo_1', r2_key: 'events/evt_1/photo_1.jpg' }],
     })
   })
