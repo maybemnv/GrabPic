@@ -88,8 +88,9 @@ grabpic/
 - Modal functions are defined in `ml/processor.py`. Do not inline ML logic anywhere else.
 
 ### Storage: Cloudflare R2
-- Original photos → R2 (`originals/`)
-- Thumbnails → R2 (`thumbs/200/`, `thumbs/800/`)
+- Original photos → R2 (`events/<event-id>/<photo-id>.jpg`)
+- Thumbnails → R2 (`events/<event-id>/thumbs/200/` and
+  `events/<event-id>/thumbs/800/`)
 - Signed URLs for all uploads. Never expose raw R2 bucket URLs to clients.
 - Thumbnail sizes: 200px (grid view), 800px (preview). 1600px added in Phase 2.
 - Upload initiation and confirmation are organizer-token protected; signed PUTs include the declared content length and confirmation verifies the stored R2 object size.
