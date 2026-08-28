@@ -1,8 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { createClientMock } = vi.hoisted(() => ({ createClientMock: vi.fn() }))
+const { createClientMock, convexClient, createConvexClientMock } = vi.hoisted(() => {
+  const convexClient = { query: vi.fn(), mutation: vi.fn() }
+  return {
+    createClientMock: vi.fn(),
+    convexClient,
+    createConvexClientMock: vi.fn(() => convexClient),
+  }
+})
 
 vi.mock('@libsql/client', () => ({ createClient: createClientMock }))
+vi.mock('../apps/api/src/lib/convex', () => ({
+  createConvexClient: createConvexClientMock,
+  hasConvexError: (error: unknown, code: string) => String(error).includes(code),
+}))
 
 import app, { type Env } from '../apps/api/src/index'
 import { hashOrganizerToken } from '../apps/api/src/lib/organizer-auth'
@@ -32,9 +43,13 @@ function testEnv(): Env {
     LOG_LEVEL: 'error',
     SENTRY_DSN: '',
     MODAL_TOKEN: '',
+    MODAL_CALLBACK_TOKEN: '',
     MODAL_WEBHOOK_URL: '',
+    MODAL_CANCEL_URL: '',
     MODAL_EMBEDDING_URL: '',
     MATCH_THRESHOLD: '0.6',
+    CONVEX_URL: 'https://convex.example.test',
+    CONVEX_SERVICE_SECRET: 'worker-secret',
     TURSO_URL: 'libsql://test.turso.io',
     TURSO_TOKEN: 'token',
   }
@@ -52,6 +67,12 @@ describe('organizer route authorization', () => {
       }),
     }
     createClientMock.mockReturnValue(db)
+    convexClient.query.mockReset().mockResolvedValueOnce(null).mockResolvedValue({
+      status: 'processing',
+      photoCount: 0,
+      maxPhotos: 100,
+      hasProcessingJob: false,
+    })
 
     const requests = [
       new Request('https://api.test/events/evt_1'),
@@ -88,6 +109,12 @@ describe('organizer route authorization', () => {
       }),
     }
     createClientMock.mockReturnValue(db)
+    convexClient.query.mockReset().mockResolvedValueOnce(null).mockResolvedValue({
+      status: 'processing',
+      photoCount: 0,
+      maxPhotos: 100,
+      hasProcessingJob: false,
+    })
     const limit = vi.fn(async () => ({ success: true }))
     const head = vi.fn(async () => ({ size: MAX_UPLOAD_BYTES + 1 }))
     const remove = vi.fn(async () => undefined)
