@@ -4,6 +4,7 @@ import os
 import time
 from io import BytesIO
 from typing import Any, Dict, List, Tuple
+from urllib import request as urllib_request
 
 from fastapi import Request
 import modal
@@ -18,7 +19,6 @@ image = (
         "boto3",
         "facenet-pytorch",
         "fastapi",
-        "libsql-client",
         "numpy",
         "pillow",
         "scikit-learn",
@@ -30,8 +30,8 @@ image = (
     )
 )
 
-secrets = [
-    modal.Secret.from_name("turso-credentials"),
+auth_secrets = [modal.Secret.from_name("grabpic-modal-auth")]
+processing_secrets = [
     modal.Secret.from_name("grabpic-r2"),
     modal.Secret.from_name("grabpic-modal-auth"),
 ]
@@ -45,11 +45,21 @@ def normalize_embedding(values: Any) -> np.ndarray:
     return embedding / norm
 
 
-def parse_processing_request(payload: Dict[str, Any]) -> Tuple[str, List[Dict[str, str]]]:
+def parse_processing_request(
+    payload: Dict[str, Any],
+) -> Tuple[str, str, List[Dict[str, str]]]:
+    job_id = payload.get("job_id")
     event_id = payload.get("event_id")
     photos = payload.get("photos")
-    if not isinstance(event_id, str) or not event_id or not isinstance(photos, list) or not 1 <= len(photos) <= 1000:
-        raise ValueError("event_id and 1-1000 photos are required")
+    if (
+        not isinstance(job_id, str)
+        or not job_id
+        or not isinstance(event_id, str)
+        or not event_id
+        or not isinstance(photos, list)
+        or not 1 <= len(photos) <= 1000
+    ):
+        raise ValueError("job_id, event_id, and 1-1000 photos are required")
 
     parsed: List[Dict[str, str]] = []
     prefix = f"events/{event_id}/"
@@ -67,7 +77,7 @@ def parse_processing_request(payload: Dict[str, Any]) -> Tuple[str, List[Dict[st
         ):
             raise ValueError("photo references must be scoped to the event")
         parsed.append({"photo_id": photo_id, "r2_key": r2_key})
-    return event_id, parsed
+    return job_id, event_id, parsed
 
 
 def thumbnail_keys(event_id: str, photo_id: str) -> Tuple[str, str]:
@@ -77,13 +87,63 @@ def thumbnail_keys(event_id: str, photo_id: str) -> Tuple[str, str]:
     )
 
 
-def database():
-    from libsql_client import create_client_sync
+def accepted_job_id(call: Any) -> str:
+    job_id = getattr(call, "object_id", None)
+    if not isinstance(job_id, str) or not job_id or len(job_id) > 200:
+        raise ValueError("Modal did not return a real job identifier")
+    return job_id
 
-    return create_client_sync(
-        url=os.environ["TURSO_URL"],
-        auth_token=os.environ["TURSO_TOKEN"],
+
+def build_callback_payloads(
+    job_id: str,
+    event_id: str,
+    photos: List[Dict[str, Any]],
+    faces: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    payloads: List[Dict[str, Any]] = []
+    for offset in range(0, len(faces), 25):
+        batch = faces[offset : offset + 25]
+        photo_ids = {face["photoId"] for face in batch}
+        payloads.append(
+            {
+                "status": "success",
+                "jobId": job_id,
+                "eventId": event_id,
+                "final": False,
+                "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
+                "faces": batch,
+            }
+        )
+    payloads.append(
+        {
+            "status": "success",
+            "jobId": job_id,
+            "eventId": event_id,
+            "final": True,
+            "photos": photos,
+            "faces": [],
+        }
     )
+    return payloads
+
+
+def send_callback(payload: Dict[str, Any]) -> None:
+    callback_url = os.environ.get("WORKER_CALLBACK_URL")
+    callback_token = os.environ.get("MODAL_CALLBACK_TOKEN")
+    if not callback_url or not callback_token:
+        raise ValueError("Worker callback configuration is required")
+    callback_request = urllib_request.Request(
+        callback_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {callback_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(callback_request, timeout=30) as response:
+        if not 200 <= response.status < 300:
+            raise RuntimeError("Worker rejected Modal callback")
 
 
 def object_store():
@@ -129,7 +189,9 @@ def embed_faces(image, detector, resnet, device, one_face: bool = False):
         return []
 
     with torch.no_grad():
-        embeddings = torch.nn.functional.normalize(resnet(tensors[candidates].to(device)), p=2, dim=1)
+        embeddings = torch.nn.functional.normalize(
+            resnet(tensors[candidates].to(device)), p=2, dim=1
+        )
 
     return [
         (boxes[index], float(probabilities[index]), embeddings[position].cpu().numpy())
@@ -142,7 +204,9 @@ def image_from_data_url(data_url: str):
 
     try:
         _, encoded = data_url.split(",", 1)
-        return Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert("RGB")
+        return Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert(
+            "RGB"
+        )
     except Exception as error:
         raise ValueError("invalid selfie image") from error
 
@@ -163,20 +227,22 @@ def require_auth(request) -> None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
-@app.function(image=image, gpu="T4", timeout=600, memory=4096, secrets=secrets)
-@modal.fastapi_endpoint(method="POST")
-def process_event(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    require_auth(request)
-    event_id, photos = parse_processing_request(payload)
-    db = database()
+@app.function(
+    image=image, gpu="T4", timeout=600, memory=4096, secrets=processing_secrets
+)
+def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+    job_id, event_id, photos = parse_processing_request(payload)
     store = object_store()
     detector, resnet, device = load_models()
     start = time.time()
-    all_faces = []
+    all_faces: List[Dict[str, Any]] = []
+    processed_photos: List[Dict[str, Any]] = []
 
     try:
         for photo in photos:
-            source = store.get_object(Bucket=os.environ["R2_BUCKET"], Key=photo["r2_key"])["Body"].read()
+            source = store.get_object(
+                Bucket=os.environ["R2_BUCKET"], Key=photo["r2_key"]
+            )["Body"].read()
             from PIL import Image
 
             image = Image.open(BytesIO(source)).convert("RGB")
@@ -194,16 +260,23 @@ def process_event(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
                 Body=image_bytes(image, 800),
                 ContentType="image/jpeg",
             )
-            db.execute(
-                "UPDATE photos SET thumbnail_200_key = ?, thumbnail_800_key = ?, width = ?, height = ? WHERE id = ? AND event_id = ?",
-                [thumb_200, thumb_800, width, height, photo["photo_id"], event_id],
+            processed_photos.append(
+                {
+                    "photoId": photo["photo_id"],
+                    "thumbnail200Key": thumb_200,
+                    "thumbnail800Key": thumb_800,
+                    "width": width,
+                    "height": height,
+                }
             )
 
-            for index, (box, confidence, embedding) in enumerate(embed_faces(image, detector, resnet, device)):
+            for index, (box, confidence, embedding) in enumerate(
+                embed_faces(image, detector, resnet, device)
+            ):
                 all_faces.append(
                     {
-                        "id": f"face_{photo['photo_id']}_{index}",
-                        "photo_id": photo["photo_id"],
+                        "faceId": f"face_{photo['photo_id']}_{index}",
+                        "photoId": photo["photo_id"],
                         "bbox": {
                             "x": float(box[0]),
                             "y": float(box[1]),
@@ -211,35 +284,63 @@ def process_event(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
                             "height": float(box[3] - box[1]),
                         },
                         "confidence": confidence,
-                        "embedding": normalize_embedding(embedding),
+                        "embedding": normalize_embedding(embedding).tolist(),
                     }
                 )
 
-        for photo in photos:
-            db.execute(
-                "DELETE FROM face_embeddings WHERE face_id IN (SELECT id FROM faces WHERE photo_id = ? AND photo_id IN (SELECT id FROM photos WHERE event_id = ?))",
-                [photo["photo_id"], event_id],
-            )
-            db.execute("DELETE FROM faces WHERE photo_id = ? AND photo_id IN (SELECT id FROM photos WHERE event_id = ?)", [photo["photo_id"], event_id])
-
-        clusters = cluster_faces(np.array([face["embedding"] for face in all_faces])) if all_faces else np.array([])
+        clusters = (
+            cluster_faces(np.array([face["embedding"] for face in all_faces]))
+            if all_faces
+            else np.array([])
+        )
         for face, cluster_id in zip(all_faces, clusters):
-            face["cluster_id"] = f"cluster_{cluster_id}" if cluster_id != -1 else None
-        store_faces_in_db(db, all_faces)
-        cluster_count = len(set(clusters)) - (1 if -1 in clusters else 0) if all_faces else 0
+            face["clusterId"] = f"cluster_{cluster_id}" if cluster_id != -1 else None
+        cluster_count = (
+            len(set(clusters)) - (1 if -1 in clusters else 0) if all_faces else 0
+        )
         processing_time = time.time() - start
-        db.execute("UPDATE events SET status = 'ready', face_count = ? WHERE id = ?", [len(all_faces), event_id])
+        for callback in build_callback_payloads(
+            job_id,
+            event_id,
+            processed_photos,
+            all_faces,
+        ):
+            send_callback(callback)
         return {
             "faces_detected": len(all_faces),
             "clusters_found": cluster_count,
             "processing_time": processing_time,
         }
     except Exception:
-        db.execute("UPDATE events SET status = 'failed' WHERE id = ?", [event_id])
+        send_callback({"status": "failed", "jobId": job_id, "eventId": event_id})
         raise
 
 
-@app.function(image=image, gpu="T4", timeout=120, memory=4096, secrets=secrets)
+@app.function(image=image, timeout=30, secrets=auth_secrets)
+@modal.fastapi_endpoint(method="POST")
+def process_event(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
+    require_auth(request)
+    parse_processing_request(payload)
+    call = process_event_job.spawn(payload)
+    return {"job_id": accepted_job_id(call)}
+
+
+@app.function(image=image, timeout=30, secrets=auth_secrets)
+@modal.fastapi_endpoint(method="POST")
+def cancel_processing(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
+    require_auth(request)
+    modal_job_id = payload.get("modal_job_id")
+    if not isinstance(modal_job_id, str) or not modal_job_id or len(modal_job_id) > 200:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail="modal_job_id is required")
+    modal.FunctionCall.from_id(modal_job_id).cancel()
+    return {"cancelled": True}
+
+
+@app.function(
+    image=image, gpu="T4", timeout=120, memory=4096, secrets=processing_secrets
+)
 @modal.fastapi_endpoint(method="POST")
 def embed_selfie(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
     require_auth(request)
@@ -267,15 +368,3 @@ def embed_selfie(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def cluster_faces(embeddings: np.ndarray) -> np.ndarray:
     return DBSCAN(eps=0.4, min_samples=2, metric="cosine").fit_predict(embeddings)
-
-
-def store_faces_in_db(db, faces: List[Dict[str, Any]]) -> None:
-    for face in faces:
-        db.execute(
-            "INSERT INTO faces (id, photo_id, bbox, confidence, cluster_id) VALUES (?, ?, ?, ?, ?)",
-            [face["id"], face["photo_id"], json.dumps(face["bbox"]), face["confidence"], face["cluster_id"]],
-        )
-        db.execute(
-            "INSERT INTO face_embeddings (id, face_id, embedding, created_at) VALUES (?, ?, ?, ?)",
-            [face["id"], face["id"], normalize_embedding(face["embedding"]).tobytes(), int(time.time())],
-        )
