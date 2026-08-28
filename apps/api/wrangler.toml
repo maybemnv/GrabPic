@@ -16,8 +16,6 @@ namespace_id = "1001"
 
 [vars]
 LOG_LEVEL = "info"
-SENTRY_DSN = ""
-MODAL_TOKEN = ""
 MODAL_WEBHOOK_URL = ""
 MODAL_CANCEL_URL = ""
 MODAL_EMBEDDING_URL = ""
