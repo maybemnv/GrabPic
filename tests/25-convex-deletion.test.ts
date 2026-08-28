@@ -91,6 +91,11 @@ describe('Convex deletion state', () => {
       organizerTokenHash: 'a'.repeat(64),
       now: 1_700_000_300,
     })
+    await t.mutation(api.deletion.markModalCancelled, {
+      serviceSecret,
+      eventPublicId: 'evt_1234abcd',
+      now: 1_700_000_301,
+    })
 
     const first = await t.mutation(api.deletion.purgeBatch, {
       serviceSecret,
@@ -154,7 +159,7 @@ describe('Convex deletion state', () => {
           inviteToken: `${String(index).padStart(2, '0')}`.repeat(16),
           organizerTokenHash: 'a'.repeat(64),
           createdAt: 1_700_000_000,
-          expiresAt: 1_800_000_000,
+          expiresAt: 1_700_000_050,
           status: 'deleting',
           photoCount: 0,
           faceCount: 0,
@@ -195,5 +200,41 @@ describe('Convex deletion state', () => {
 
     expect(candidates).toContain('evt_expired_new')
     expect(candidates.length).toBeLessThanOrEqual(100)
+  })
+
+  it('does not purge while a Modal dispatch is unresolved', async () => {
+    const t = convexTest(schema, modules)
+    await seed(t)
+    await t.run(async (ctx) => {
+      const job = await ctx.db.query('processingJobs').first()
+      if (!job) throw new Error('fixture missing')
+      await ctx.db.patch(job._id, { status: 'pending', modalJobId: undefined })
+    })
+    await t.mutation(api.deletion.beginOrganizer, {
+      serviceSecret,
+      eventPublicId: 'evt_1234abcd',
+      organizerTokenHash: 'a'.repeat(64),
+      now: 1_700_000_300,
+    })
+
+    await expect(
+      t.mutation(api.deletion.purgeBatch, {
+        serviceSecret,
+        eventPublicId: 'evt_1234abcd',
+      }),
+    ).rejects.toMatchObject({ data: { code: 'MODAL_DISPATCH_UNRESOLVED' } })
+    expect(await t.run(async (ctx) => await ctx.db.query('events').first())).not.toBeNull()
+    expect(await t.run(async (ctx) => await ctx.db.query('processingJobs').first())).not.toBeNull()
+
+    await expect(
+      t.mutation(api.processing.markDispatchFailed, {
+        serviceSecret,
+        eventPublicId: 'evt_1234abcd',
+        jobPublicId: 'job_1',
+        attempt: 1,
+        sanitizedError: 'Modal did not accept the processing request',
+        now: 1_700_000_301,
+      }),
+    ).resolves.toEqual({ recorded: true })
   })
 })

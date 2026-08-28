@@ -2,11 +2,12 @@ import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { MutationCtx } from './_generated/server'
 import { eventByPublicId, requireOrganizer } from './lib/events'
+import { appError } from './lib/errors'
 import { requireServiceSecret } from './lib/validation'
 
 async function markDeleting(ctx: MutationCtx, eventPublicId: string, now: number) {
   const event = await eventByPublicId(ctx, eventPublicId)
-  if (!event) throw new Error('EVENT_NOT_FOUND')
+  if (!event) appError('EVENT_NOT_FOUND')
   if (event.status !== 'deleting') {
     await ctx.db.patch(event._id, {
       status: 'deleting',
@@ -36,7 +37,7 @@ export const beginOrganizer = mutation({
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
-    if (!event) throw new Error('EVENT_NOT_FOUND')
+    if (!event) appError('EVENT_NOT_FOUND')
     requireOrganizer(event, args.organizerTokenHash)
     await markDeleting(ctx, args.eventPublicId, args.now)
     return { deleting: true as const }
@@ -49,8 +50,8 @@ export const beginExpired = mutation({
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
-    if (!event) throw new Error('EVENT_NOT_FOUND')
-    if (event.status !== 'deleting' && event.expiresAt > args.now) throw new Error('NOT_EXPIRED')
+    if (!event) appError('EVENT_NOT_FOUND')
+    if (event.status !== 'deleting' && event.expiresAt > args.now) appError('NOT_EXPIRED')
     await markDeleting(ctx, args.eventPublicId, args.now)
     return { deleting: true as const }
   },
@@ -68,6 +69,7 @@ export const listCandidates = query({
     const expired = await ctx.db
       .query('events')
       .withIndex('by_expires_at', (query) => query.lte('expiresAt', args.now))
+      .filter((query) => query.neq(query.field('status'), 'deleting'))
       .take(100)
     const ids: string[] = []
     const seen = new Set<string>()
@@ -92,6 +94,7 @@ export const getState = query({
       storageBytes: v.number(),
       objectKeys: v.array(v.string()),
       modalJobId: v.optional(v.string()),
+      modalDispatchUnresolved: v.boolean(),
     }),
     v.null(),
   ),
@@ -99,7 +102,7 @@ export const getState = query({
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
     if (!event) return null
-    if (event.status !== 'deleting') throw new Error('EVENT_NOT_DELETING')
+    if (event.status !== 'deleting') appError('EVENT_NOT_DELETING')
     const photos = await ctx.db
       .query('photos')
       .withIndex('by_event', (query) => query.eq('eventId', event._id))
@@ -114,14 +117,15 @@ export const getState = query({
       .query('processingJobs')
       .withIndex('by_event_status', (query) => query.eq('eventId', event._id))
       .first()
-    const shouldCancel =
-      typeof job?.modalJobId === 'string' &&
-      ['accepted', 'processing', 'cancelling'].includes(job.status)
+    const modalDispatchUnresolved =
+      job !== null && ['pending', 'accepted', 'processing', 'cancelling'].includes(job.status)
+    const shouldCancel = modalDispatchUnresolved && typeof job.modalJobId === 'string'
     return {
       eventPublicId: event.publicId,
       photoCount: photos.length,
       storageBytes: photos.reduce((total, photo) => total + photo.fileSize, 0),
       objectKeys: [...objectKeys],
+      modalDispatchUnresolved,
       ...(shouldCancel ? { modalJobId: job.modalJobId } : {}),
     }
   },
@@ -134,7 +138,7 @@ export const markModalCancelled = mutation({
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
     if (!event) return { recorded: false }
-    if (event.status !== 'deleting') throw new Error('EVENT_NOT_DELETING')
+    if (event.status !== 'deleting') appError('EVENT_NOT_DELETING')
     const job = await ctx.db
       .query('processingJobs')
       .withIndex('by_event_status', (query) => query.eq('eventId', event._id))
@@ -157,7 +161,7 @@ export const recordFailure = mutation({
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
     if (!event) return { recorded: false }
-    if (event.status !== 'deleting') throw new Error('EVENT_NOT_DELETING')
+    if (event.status !== 'deleting') appError('EVENT_NOT_DELETING')
     await ctx.db.patch(event._id, {
       deletionAttempts: event.deletionAttempts + 1,
       deletionError: args.sanitizedError.slice(0, 500),
@@ -174,7 +178,18 @@ export const purgeBatch = mutation({
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
     if (!event) return { deletedRecords: 0, eventDeleted: true }
-    if (event.status !== 'deleting') throw new Error('EVENT_NOT_DELETING')
+    if (event.status !== 'deleting') appError('EVENT_NOT_DELETING')
+
+    const activeJob = await ctx.db
+      .query('processingJobs')
+      .withIndex('by_event_status', (query) => query.eq('eventId', event._id))
+      .first()
+    if (
+      activeJob &&
+      ['pending', 'accepted', 'processing', 'cancelling'].includes(activeJob.status)
+    ) {
+      appError('MODAL_DISPATCH_UNRESOLVED')
+    }
 
     let deletedRecords = 0
     const faces = await ctx.db

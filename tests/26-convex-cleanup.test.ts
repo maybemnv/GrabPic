@@ -12,6 +12,7 @@ function state() {
       'events/evt_1234abcd/thumbs/800/photo_1234abcd.jpg',
     ],
     modalJobId: 'modal_1',
+    modalDispatchUnresolved: false,
   }
 }
 
@@ -37,6 +38,37 @@ describe('Convex external cleanup', () => {
       eventPublicId: 'evt_1234abcd',
       sanitizedError: 'Modal cancellation failed',
     })
+  })
+
+  it('defers purge while Modal dispatch is unresolved after failed compensation', async () => {
+    const client = {
+      query: vi.fn(async () => ({
+        ...state(),
+        modalJobId: undefined,
+        modalDispatchUnresolved: true,
+      })),
+      mutation: vi.fn(async () => ({ recorded: true })),
+    }
+    const bucket = { delete: vi.fn(), list: vi.fn() }
+
+    const result = await cleanupEventResources({
+      client,
+      serviceSecret: 'worker-secret',
+      bucket,
+      eventId: 'evt_1234abcd',
+      cancelModalJob: vi.fn(async () => undefined),
+    })
+
+    expect(result).toMatchObject({ deleted: false, objectsDeleted: 0 })
+    expect(bucket.list).not.toHaveBeenCalled()
+    expect(bucket.delete).not.toHaveBeenCalled()
+    expect(client.mutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventPublicId: 'evt_1234abcd',
+        sanitizedError: 'Modal dispatch unresolved',
+      }),
+    )
   })
 
   it('records partial R2 failure and retries all assets before purging', async () => {

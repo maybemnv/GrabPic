@@ -249,6 +249,11 @@ app.post('/confirm', async (c) => {
     } catch (acceptError) {
       try {
         await requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId)
+        await convex.mutation(api.deletion.markModalCancelled, {
+          serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+          eventPublicId: eventId,
+          now: Math.floor(Date.now() / 1000),
+        })
       } catch {
         log.error('upload: accepted Modal job compensation failed', {
           eventId,

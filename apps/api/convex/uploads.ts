@@ -1,6 +1,7 @@
 import { v } from 'convex/values'
 import { mutation } from './_generated/server'
 import { eventByPublicId, requireActiveEvent, requireOrganizer } from './lib/events'
+import { appError } from './lib/errors'
 import { requireServiceSecret } from './lib/validation'
 
 const confirmationResult = v.object({
@@ -29,21 +30,20 @@ export const confirm = mutation({
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
-    if (!event) throw new Error('EVENT_NOT_FOUND')
+    if (!event) appError('EVENT_NOT_FOUND')
     requireOrganizer(event, args.organizerTokenHash)
     requireActiveEvent(event, args.now)
-    if (args.photos.length < 1 || args.photos.length > 1000) throw new Error('INVALID_PHOTOS')
+    if (args.photos.length < 1 || args.photos.length > 1000) appError('INVALID_PHOTOS')
     if (new Set(args.photos.map((photo) => photo.publicId)).size !== args.photos.length) {
-      throw new Error('DUPLICATE_PHOTO_IDS')
+      appError('DUPLICATE_PHOTO_IDS')
     }
 
     for (const photo of args.photos) {
-      if (!/^photo_[a-f0-9]{8}$/i.test(photo.publicId)) throw new Error('INVALID_PHOTO_ID')
+      if (!/^photo_[a-f0-9]{8}$/i.test(photo.publicId)) appError('INVALID_PHOTO_ID')
       if (photo.originalKey !== `events/${event.publicId}/${photo.publicId}.jpg`) {
-        throw new Error('INVALID_PHOTO_KEY')
+        appError('INVALID_PHOTO_KEY')
       }
-      if (!Number.isInteger(photo.fileSize) || photo.fileSize <= 0)
-        throw new Error('INVALID_FILE_SIZE')
+      if (!Number.isInteger(photo.fileSize) || photo.fileSize <= 0) appError('INVALID_FILE_SIZE')
     }
 
     const existingPhotos = await Promise.all(
@@ -63,14 +63,14 @@ export const confirm = mutation({
 
     if (existingPhotos.some(Boolean)) {
       if (existingPhotos.some((photo) => photo === null) || !existingJob) {
-        throw new Error('PHOTO_CONFIRMATION_CONFLICT')
+        appError('PHOTO_CONFIRMATION_CONFLICT')
       }
       const existingIds = new Set(existingPhotos.map((photo) => photo!._id))
       if (
         existingJob.photoIds.length !== existingIds.size ||
         existingJob.photoIds.some((photoId) => !existingIds.has(photoId))
       ) {
-        throw new Error('PHOTO_CONFIRMATION_CONFLICT')
+        appError('PHOTO_CONFIRMATION_CONFLICT')
       }
       if (existingJob.status === 'failed') {
         let removedFaces = 0
@@ -105,16 +105,16 @@ export const confirm = mutation({
       }
     }
 
-    if (event.status !== 'processing') throw new Error('UPLOADS_CLOSED')
-    if (existingJob) throw new Error('UPLOADS_CLOSED')
+    if (event.status !== 'processing') appError('UPLOADS_CLOSED')
+    if (existingJob) appError('UPLOADS_CLOSED')
     if (event.photoCount + args.photos.length > event.maxPhotos) {
-      throw new Error('MAX_PHOTOS_EXCEEDED')
+      appError('MAX_PHOTOS_EXCEEDED')
     }
     const jobConflict = await ctx.db
       .query('processingJobs')
       .withIndex('by_public_id', (query) => query.eq('publicId', args.jobPublicId))
       .first()
-    if (jobConflict) throw new Error('JOB_ID_CONFLICT')
+    if (jobConflict) appError('JOB_ID_CONFLICT')
 
     const photoIds = []
     for (const photo of args.photos) {

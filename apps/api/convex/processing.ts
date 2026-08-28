@@ -2,6 +2,7 @@ import { v } from 'convex/values'
 import { mutation } from './_generated/server'
 import type { MutationCtx } from './_generated/server'
 import { eventByPublicId } from './lib/events'
+import { appError } from './lib/errors'
 import { requireServiceSecret, validateNormalizedEmbedding } from './lib/validation'
 
 async function getJob(
@@ -11,14 +12,14 @@ async function getJob(
   attempt?: number,
 ) {
   const event = await eventByPublicId(ctx, eventPublicId)
-  if (!event) throw new Error('EVENT_NOT_FOUND')
-  if (event.status === 'deleting') throw new Error('EVENT_DELETING')
+  if (!event) appError('EVENT_NOT_FOUND')
+  if (event.status === 'deleting') appError('EVENT_DELETING')
   const job = await ctx.db
     .query('processingJobs')
     .withIndex('by_public_id', (query) => query.eq('publicId', jobPublicId))
     .unique()
-  if (!job || job.eventId !== event._id) throw new Error('JOB_NOT_FOUND')
-  if (attempt !== undefined && job.attempts !== attempt) throw new Error('STALE_JOB')
+  if (!job || job.eventId !== event._id) appError('JOB_NOT_FOUND')
+  if (attempt !== undefined && job.attempts !== attempt) appError('STALE_JOB')
   return { event, job }
 }
 
@@ -34,11 +35,11 @@ export const markAccepted = mutation({
   returns: v.object({ accepted: v.boolean() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    if (!args.modalJobId || args.modalJobId.length > 200) throw new Error('INVALID_MODAL_JOB_ID')
-    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    if (!args.modalJobId || args.modalJobId.length > 200) appError('INVALID_MODAL_JOB_ID')
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) appError('INVALID_ATTEMPT')
     const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
-    if (job.modalJobId && job.modalJobId !== args.modalJobId) throw new Error('STALE_JOB')
-    if (job.status === 'complete' || job.status === 'cancelled') throw new Error('STALE_JOB')
+    if (job.modalJobId && job.modalJobId !== args.modalJobId) appError('STALE_JOB')
+    if (job.status === 'complete' || job.status === 'cancelled') appError('STALE_JOB')
     await ctx.db.patch(job._id, {
       status: 'accepted',
       modalJobId: args.modalJobId,
@@ -62,8 +63,15 @@ export const markDispatchFailed = mutation({
   returns: v.object({ recorded: v.boolean() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
-    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) appError('INVALID_ATTEMPT')
+    const event = await eventByPublicId(ctx, args.eventPublicId)
+    if (!event) return { recorded: false }
+    const job = await ctx.db
+      .query('processingJobs')
+      .withIndex('by_public_id', (query) => query.eq('publicId', args.jobPublicId))
+      .unique()
+    if (!job || job.eventId !== event._id) return { recorded: false }
+    if (job.attempts !== args.attempt) appError('STALE_JOB')
     if (job.modalJobId || job.status === 'accepted' || job.status === 'processing') {
       return { recorded: false }
     }
@@ -139,31 +147,31 @@ export const persistResults = mutation({
   }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) appError('INVALID_ATTEMPT')
     const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
-    if (!['accepted', 'processing', 'complete'].includes(job.status)) throw new Error('STALE_JOB')
-    if (args.faces.length > 25) throw new Error('TOO_MANY_FACES')
+    if (!['accepted', 'processing', 'complete'].includes(job.status)) appError('STALE_JOB')
+    if (args.faces.length > 25) appError('TOO_MANY_FACES')
     if (new Set(args.photos.map((photo) => photo.publicId)).size !== args.photos.length) {
-      throw new Error('DUPLICATE_PHOTOS')
+      appError('DUPLICATE_PHOTOS')
     }
     if (new Set(args.faces.map((face) => face.publicId)).size !== args.faces.length) {
-      throw new Error('DUPLICATE_FACES')
+      appError('DUPLICATE_FACES')
     }
     const batchPhotoIds = new Set(args.photos.map((photo) => photo.publicId))
 
     const jobPhotos = await Promise.all(job.photoIds.map((photoId) => ctx.db.get(photoId)))
     if (jobPhotos.some((photo) => !photo || photo.eventId !== event._id)) {
-      throw new Error('JOB_PHOTO_MISMATCH')
+      appError('JOB_PHOTO_MISMATCH')
     }
     const photosByPublicId = new Map(jobPhotos.map((photo) => [photo!.publicId, photo!]))
 
     for (const photo of args.photos) {
-      if (!photosByPublicId.has(photo.publicId)) throw new Error('PHOTO_NOT_IN_JOB')
+      if (!photosByPublicId.has(photo.publicId)) appError('PHOTO_NOT_IN_JOB')
       if (
         photo.thumbnail200Key !== `events/${event.publicId}/thumbs/200/${photo.publicId}.jpg` ||
         photo.thumbnail800Key !== `events/${event.publicId}/thumbs/800/${photo.publicId}.jpg`
       ) {
-        throw new Error('INVALID_THUMBNAIL_KEY')
+        appError('INVALID_THUMBNAIL_KEY')
       }
       if (
         !Number.isInteger(photo.width) ||
@@ -171,16 +179,16 @@ export const persistResults = mutation({
         !Number.isInteger(photo.height) ||
         photo.height <= 0
       ) {
-        throw new Error('INVALID_DIMENSIONS')
+        appError('INVALID_DIMENSIONS')
       }
     }
     for (const face of args.faces) {
-      if (!batchPhotoIds.has(face.photoPublicId)) throw new Error('PHOTO_NOT_IN_JOB')
-      if (!photosByPublicId.has(face.photoPublicId)) throw new Error('PHOTO_NOT_IN_JOB')
-      if (!face.publicId || face.publicId.length > 200) throw new Error('INVALID_FACE_ID')
-      if (!finiteBox(face.bbox)) throw new Error('INVALID_BBOX')
+      if (!batchPhotoIds.has(face.photoPublicId)) appError('PHOTO_NOT_IN_JOB')
+      if (!photosByPublicId.has(face.photoPublicId)) appError('PHOTO_NOT_IN_JOB')
+      if (!face.publicId || face.publicId.length > 200) appError('INVALID_FACE_ID')
+      if (!finiteBox(face.bbox)) appError('INVALID_BBOX')
       if (!Number.isFinite(face.confidence) || face.confidence < 0.9 || face.confidence > 1) {
-        throw new Error('INVALID_CONFIDENCE')
+        appError('INVALID_CONFIDENCE')
       }
       if (face.landmarks) {
         const points = Object.values(face.landmarks)
@@ -189,7 +197,7 @@ export const persistResults = mutation({
             (point) => point.length !== 2 || point.some((value) => !Number.isFinite(value)),
           )
         ) {
-          throw new Error('INVALID_LANDMARKS')
+          appError('INVALID_LANDMARKS')
         }
       }
       validateNormalizedEmbedding(face.embedding)
@@ -198,7 +206,7 @@ export const persistResults = mutation({
     if (job.status === 'complete') {
       return { accepted: true as const, duplicate: true, completed: true }
     }
-    if (args.final && args.photos.length !== job.photoIds.length) throw new Error('INCOMPLETE_JOB')
+    if (args.final && args.photos.length !== job.photoIds.length) appError('INCOMPLETE_JOB')
 
     const newFacesByPhoto = new Map<string, number>()
     let insertedFaces = 0
@@ -212,7 +220,7 @@ export const persistResults = mutation({
         .unique()
       if (existing) {
         if (existing.photoId !== photo._id || !sameNumbers(existing.embedding, face.embedding)) {
-          throw new Error('FACE_CONFLICT')
+          appError('FACE_CONFLICT')
         }
         continue
       }
@@ -272,9 +280,9 @@ export const markProcessingFailed = mutation({
   returns: v.object({ recorded: v.boolean() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    if (!Number.isInteger(args.attempt) || args.attempt < 1) throw new Error('INVALID_ATTEMPT')
+    if (!Number.isInteger(args.attempt) || args.attempt < 1) appError('INVALID_ATTEMPT')
     const { event, job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
-    if (job.status === 'complete' || job.status === 'cancelled') throw new Error('STALE_JOB')
+    if (job.status === 'complete' || job.status === 'cancelled') appError('STALE_JOB')
     await ctx.db.patch(job._id, {
       status: 'failed',
       sanitizedError: args.sanitizedError.slice(0, 500),

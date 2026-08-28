@@ -98,7 +98,7 @@ describe('Convex upload confirmation mutation', () => {
         ...confirmArgs(),
         organizerTokenHash: 'b'.repeat(64),
       }),
-    ).rejects.toThrow('UNAUTHORIZED')
+    ).rejects.toMatchObject({ data: { code: 'UNAUTHORIZED' } })
 
     const photos = await t.run(async (ctx) => await ctx.db.query('photos').collect())
     expect(photos).toEqual([])

@@ -198,5 +198,28 @@ describe('Convex upload confirmation', () => {
       'modal-token',
       'modal_1',
     )
+    expect(client.mutation).toHaveBeenCalledTimes(3)
+    expect(client.mutation.mock.calls[2][1]).toMatchObject({
+      eventPublicId: 'evt_1',
+    })
+  })
+
+  it('leaves dispatch unresolved when compensation cancellation fails', async () => {
+    client.mutation
+      .mockResolvedValueOnce({ jobId: 'job_1', attempt: 1, shouldDispatch: true })
+      .mockRejectedValueOnce(new Error('EVENT_DELETING'))
+    requestProcessingCancellationMock.mockRejectedValueOnce(new Error('cancel unavailable'))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ job_id: 'modal_1' }, { status: 202 })),
+    )
+
+    const response = await app.fetch(confirmationRequest(), testEnv(), {
+      waitUntil: vi.fn(),
+    } as unknown as ExecutionContext)
+
+    expect(response.status).toBe(409)
+    expect(requestProcessingCancellationMock).toHaveBeenCalledOnce()
+    expect(client.mutation).toHaveBeenCalledTimes(2)
   })
 })

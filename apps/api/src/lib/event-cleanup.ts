@@ -83,6 +83,12 @@ export async function cleanupEventResources({
       return failureResult(state, [], 0)
     }
   }
+  if (state.modalDispatchUnresolved && !state.modalJobId) {
+    await recordFailure(client, serviceSecret, eventId, 'Modal dispatch unresolved')
+    log?.error('event: Modal dispatch unresolved', { eventId })
+    sentry?.captureMessage('Event Modal dispatch unresolved', { eventId })
+    return failureResult(state, [], 0)
+  }
 
   const eventPrefix = `events/${eventId}/`
   const objectKeys = new Set(state.objectKeys)
