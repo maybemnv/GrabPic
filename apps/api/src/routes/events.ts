@@ -1,12 +1,16 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
 import { cleanupEventResources } from '../lib/event-cleanup'
+import { createConvexClient, hasConvexError } from '../lib/convex'
+import { resolveMatchThreshold } from '../lib/matching'
 import {
   generateOrganizerToken,
+  hashOrganizerAuthorization,
   hashOrganizerToken,
-  verifyOrganizerToken,
 } from '../lib/organizer-auth'
+import { requestProcessingCancellation } from '../lib/modal'
 import { insertEventWithUniquePasscode } from '../lib/passcodes'
 import { rateLimitKey } from '../lib/rate-limit'
 
@@ -56,26 +60,24 @@ app.post('/', async (c) => {
     const inviteToken = crypto.randomUUID().replaceAll('-', '')
     const now = Math.floor(Date.now() / 1000)
 
-    const db = (await import('@libsql/client')).createClient({
-      url: c.env.TURSO_URL,
-      authToken: c.env.TURSO_TOKEN,
-    })
+    const convex = createConvexClient(c.env)
 
     const passcode = await insertEventWithUniquePasscode(async (candidate) => {
-      await db.execute({
-        sql: `INSERT INTO events (id, name, passcode, invite_token, organizer_token_hash, created_at, expires_at, status, organizer_email, organizer_name)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?)`,
-        args: [
-          eventId,
-          name,
-          candidate,
-          inviteToken,
-          organizerTokenHash,
-          now,
-          now + expiryDays * 86400,
-          organizerEmail,
-          organizerName,
-        ],
+      await convex.mutation(api.events.create, {
+        serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+        publicId: eventId,
+        name,
+        passcode: candidate,
+        inviteToken,
+        organizerTokenHash,
+        createdAt: now,
+        expiresAt: now + expiryDays * 86400,
+        organizerEmail,
+        organizerName,
+        maxPhotos: 100,
+        tier: 'free',
+        matchThreshold: resolveMatchThreshold(c.env.MATCH_THRESHOLD),
+        clusteringEps: 0.4,
       })
     })
 
@@ -112,151 +114,153 @@ app.post('/lookup', async (c) => {
     return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
   }
 
-  const db = (await import('@libsql/client')).createClient({
-    url: c.env.TURSO_URL,
-    authToken: c.env.TURSO_TOKEN,
+  const event = await createConvexClient(c.env).query(api.events.lookupByPasscode, {
+    serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+    passcode: parsed.data.passcode,
+    now: Math.floor(Date.now() / 1000),
   })
-  const result = await db.execute({
-    sql: 'SELECT id, name, status FROM events WHERE passcode = ?',
-    args: [parsed.data.passcode],
-  })
-  if (result.rows.length === 0) {
+  if (!event) {
     return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
   }
 
-  const row = result.rows[0] as Record<string, unknown>
-  return c.json({ eventId: String(row.id), name: String(row.name), status: String(row.status) })
+  return c.json(event)
 })
 
 app.get('/invite/:inviteToken', async (c) => {
   const inviteToken = c.req.param('inviteToken')
-  const db = (await import('@libsql/client')).createClient({
-    url: c.env.TURSO_URL,
-    authToken: c.env.TURSO_TOKEN,
+  const event = await createConvexClient(c.env).query(api.events.lookupByInvite, {
+    serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+    inviteToken,
+    now: Math.floor(Date.now() / 1000),
   })
-  const result = await db.execute({
-    sql: 'SELECT id, name, status FROM events WHERE invite_token = ?',
-    args: [inviteToken],
-  })
-  if (result.rows.length === 0) {
+  if (!event) {
     return c.json({ error: 'Invite not found', code: 'NOT_FOUND' }, 404)
   }
 
-  const row = result.rows[0] as Record<string, unknown>
-  return c.json({ eventId: String(row.id), name: String(row.name), status: String(row.status) })
+  return c.json(event)
 })
 
 app.get('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
   const log = c.get('logger')
-
-  const db = (await import('@libsql/client')).createClient({
-    url: c.env.TURSO_URL,
-    authToken: c.env.TURSO_TOKEN,
-  })
-
-  const result = await db.execute({
-    sql: 'SELECT * FROM events WHERE id = ?',
-    args: [eventId],
-  })
-
-  if (result.rows.length === 0) {
-    log.warn('event: not found', { eventId })
-    return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-  }
-
-  const eventRow = result.rows[0] as Record<string, unknown>
-  if (!(await verifyOrganizerToken(c.req.header('authorization'), eventRow.organizer_token_hash))) {
+  const organizerTokenHash = await hashOrganizerAuthorization(c.req.header('authorization'))
+  if (!organizerTokenHash) {
     return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
   }
 
-  const { organizer_token_hash: _organizerTokenHash, ...eventData } = eventRow
-  return c.json(eventData)
+  try {
+    const event = await createConvexClient(c.env).query(api.events.getOrganizerEvent, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      publicId: eventId,
+      organizerTokenHash,
+    })
+    if (!event) {
+      log.warn('event: not found', { eventId })
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+
+    return c.json({
+      id: event.publicId,
+      name: event.name,
+      passcode: event.passcode,
+      invite_token: event.inviteToken,
+      created_at: event.createdAt,
+      expires_at: event.expiresAt,
+      status: event.status,
+      photo_count: event.photoCount,
+      face_count: event.faceCount,
+      organizer_email: event.organizerEmail,
+      organizer_name: event.organizerName,
+      max_photos: event.maxPhotos,
+      tier: event.tier,
+    })
+  } catch (error) {
+    if (hasConvexError(error, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+    throw error
+  }
 })
 
 app.get('/:eventId/status', async (c) => {
   const eventId = c.req.param('eventId')
   const log = c.get('logger')
-
-  const db = (await import('@libsql/client')).createClient({
-    url: c.env.TURSO_URL,
-    authToken: c.env.TURSO_TOKEN,
-  })
-
-  const result = await db.execute({
-    sql: 'SELECT status, photo_count, face_count, organizer_token_hash FROM events WHERE id = ?',
-    args: [eventId],
-  })
-
-  if (result.rows.length === 0) {
-    log.warn('event: status not found', { eventId })
-    return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-  }
-
-  const row = result.rows[0] as Record<string, unknown>
-  if (!(await verifyOrganizerToken(c.req.header('authorization'), row.organizer_token_hash))) {
+  const organizerTokenHash = await hashOrganizerAuthorization(c.req.header('authorization'))
+  if (!organizerTokenHash) {
     return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
   }
-  const faceCount = Number(row.face_count) || 0
-  const photoCount = Number(row.photo_count) || 0
-  const status = String(row.status)
 
-  return c.json({
-    status,
-    photoCount,
-    faceCount,
-    progress: status === 'ready' ? 100 : status === 'processing' ? 50 : 0,
-    error: null,
-  })
+  try {
+    const event = await createConvexClient(c.env).query(api.events.getStatus, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      publicId: eventId,
+      organizerTokenHash,
+    })
+    if (!event) {
+      log.warn('event: status not found', { eventId })
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+
+    return c.json({
+      ...event,
+      progress: event.status === 'ready' ? 100 : event.status === 'processing' ? 50 : 0,
+    })
+  } catch (error) {
+    if (hasConvexError(error, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+    throw error
+  }
 })
 
 app.delete('/:eventId', async (c) => {
   const eventId = c.req.param('eventId')
   const log = c.get('logger')
   const sentry = c.get('sentry')
-
-  const db = (await import('@libsql/client')).createClient({
-    url: c.env.TURSO_URL,
-    authToken: c.env.TURSO_TOKEN,
-  })
-
-  const eventResult = await db.execute({
-    sql: 'SELECT id, organizer_token_hash FROM events WHERE id = ?',
-    args: [eventId],
-  })
-  if (eventResult.rows.length === 0) {
-    return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
-  }
-  const eventRow = eventResult.rows[0] as Record<string, unknown>
-  if (!(await verifyOrganizerToken(c.req.header('authorization'), eventRow.organizer_token_hash))) {
+  const organizerTokenHash = await hashOrganizerAuthorization(c.req.header('authorization'))
+  if (!organizerTokenHash) {
     return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
   }
 
-  const result = await cleanupEventResources({
-    db,
-    bucket: c.env.PHOTOS,
-    eventId,
-    log,
-    sentry,
-  })
+  try {
+    const convex = createConvexClient(c.env)
+    await convex.mutation(api.deletion.beginOrganizer, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      eventPublicId: eventId,
+      organizerTokenHash,
+      now: Math.floor(Date.now() / 1000),
+    })
+    const result = await cleanupEventResources({
+      client: convex,
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
+      bucket: c.env.PHOTOS,
+      eventId,
+      cancelModalJob: (modalJobId) =>
+        requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId),
+      log,
+      sentry,
+    })
+    if (!result) return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    if (!result.deleted) {
+      return c.json({ error: 'Failed to delete event assets', code: 'ASSET_DELETE_FAILED' }, 500)
+    }
 
-  if (!result) {
-    log.warn('event: delete not found', { eventId })
-    return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    log.info('event: deleted', { eventId, photosDeleted: result.photosDeleted })
+    sentry.captureMessage('Event deleted', { eventId, photosDeleted: result.photosDeleted })
+    return c.json({
+      deleted: true,
+      photosDeleted: result.photosDeleted,
+      storageFreed: result.storageFreed,
+    })
+  } catch (error) {
+    if (hasConvexError(error, 'EVENT_NOT_FOUND')) {
+      return c.json({ error: 'Event not found', code: 'NOT_FOUND' }, 404)
+    }
+    if (hasConvexError(error, 'UNAUTHORIZED')) {
+      return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
+    }
+    throw error
   }
-
-  if (!result.deleted) {
-    return c.json({ error: 'Failed to delete event assets', code: 'ASSET_DELETE_FAILED' }, 500)
-  }
-
-  log.info('event: deleted', { eventId, photosDeleted: result.photosDeleted })
-  sentry.captureMessage('Event deleted', { eventId, photosDeleted: result.photosDeleted })
-
-  return c.json({
-    deleted: true,
-    photosDeleted: result.photosDeleted,
-    storageFreed: result.storageFreed,
-  })
 })
 
 export { app as events }
