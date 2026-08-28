@@ -1,5 +1,6 @@
 import type { Doc } from '../_generated/dataModel'
 import type { QueryCtx } from '../_generated/server'
+import { timingSafeEqual } from './validation'
 
 export async function eventByPublicId(
   ctx: Pick<QueryCtx, 'db'>,
@@ -12,7 +13,10 @@ export async function eventByPublicId(
 }
 
 export function requireOrganizer(event: Doc<'events'>, organizerTokenHash: string): void {
-  if (organizerTokenHash.length !== 64 || event.organizerTokenHash !== organizerTokenHash) {
+  if (
+    organizerTokenHash.length !== 64 ||
+    !timingSafeEqual(event.organizerTokenHash, organizerTokenHash)
+  ) {
     throw new Error('UNAUTHORIZED')
   }
 }

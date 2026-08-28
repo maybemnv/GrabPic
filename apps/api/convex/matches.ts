@@ -4,7 +4,11 @@ import type { QueryCtx } from './_generated/server'
 import type { Id } from './_generated/dataModel'
 import { internal } from './_generated/api'
 import { eventByPublicId } from './lib/events'
-import { requireServiceSecret, validateNormalizedEmbedding } from './lib/validation'
+import {
+  requireServiceSecret,
+  timingSafeEqual,
+  validateNormalizedEmbedding,
+} from './lib/validation'
 import { selectVectorMatches } from './lib/vectorMatching'
 
 const accessArgs = {
@@ -46,8 +50,8 @@ async function requireMatchEvent(
   const event = await eventByPublicId(ctx, args.eventPublicId)
   if (!event) throw new Error('EVENT_NOT_FOUND')
   const authorized =
-    (args.passcode !== undefined && args.passcode === event.passcode) ||
-    (args.inviteToken !== undefined && args.inviteToken === event.inviteToken)
+    (args.passcode !== undefined && timingSafeEqual(args.passcode, event.passcode)) ||
+    (args.inviteToken !== undefined && timingSafeEqual(args.inviteToken, event.inviteToken))
   if (!authorized) throw new Error('UNAUTHORIZED')
   if (event.status !== 'ready' || event.expiresAt <= args.now) throw new Error('NOT_READY')
   return event
@@ -134,6 +138,8 @@ export const recordSession = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event || event.status === 'deleting') return null
     await ctx.db.insert('matchSessions', args)
     return null
   },

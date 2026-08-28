@@ -48,6 +48,7 @@ async function seed(t: ReturnType<typeof convexTest>, expiresAt = 1_800_000_000)
     serviceSecret,
     eventPublicId: 'evt_1234abcd',
     jobPublicId: 'job_1',
+    attempt: 1,
     modalJobId: 'modal_1',
     now: 1_700_000_101,
   })
@@ -140,5 +141,59 @@ describe('Convex deletion state', () => {
       now: 1_700_000_100,
     })
     expect(retryCandidates).toContain('evt_1234abcd')
+  })
+
+  it('does not let a full deleting queue starve newly expired events', async () => {
+    const t = convexTest(schema, modules)
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 100; index += 1) {
+        await ctx.db.insert('events', {
+          publicId: `evt_del_${index}`,
+          name: 'Deleting',
+          passcode: `${String(index).padStart(6, '0')}`,
+          inviteToken: `${String(index).padStart(2, '0')}`.repeat(16),
+          organizerTokenHash: 'a'.repeat(64),
+          createdAt: 1_700_000_000,
+          expiresAt: 1_800_000_000,
+          status: 'deleting',
+          photoCount: 0,
+          faceCount: 0,
+          organizerEmail: 'organizer@example.invalid',
+          organizerName: 'Organizer',
+          maxPhotos: 100,
+          tier: 'free',
+          matchThreshold: 0.6,
+          clusteringEps: 0.4,
+          deletionAttempts: 1,
+        })
+      }
+      await ctx.db.insert('events', {
+        publicId: 'evt_expired_new',
+        name: 'Expired',
+        passcode: '999999',
+        inviteToken: '9'.repeat(32),
+        organizerTokenHash: 'b'.repeat(64),
+        createdAt: 1_700_000_000,
+        expiresAt: 1_700_000_050,
+        status: 'ready',
+        photoCount: 0,
+        faceCount: 0,
+        organizerEmail: 'organizer@example.invalid',
+        organizerName: 'Organizer',
+        maxPhotos: 100,
+        tier: 'free',
+        matchThreshold: 0.6,
+        clusteringEps: 0.4,
+        deletionAttempts: 0,
+      })
+    })
+
+    const candidates = await t.query(api.deletion.listCandidates, {
+      serviceSecret,
+      now: 1_700_000_100,
+    })
+
+    expect(candidates).toContain('evt_expired_new')
+    expect(candidates.length).toBeLessThanOrEqual(100)
   })
 })

@@ -18,7 +18,7 @@ function state() {
 describe('Convex external cleanup', () => {
   it('records cancellation failure and leaves R2 and Convex rows intact', async () => {
     const client = { query: vi.fn(async () => state()), mutation: vi.fn() }
-    const bucket = { delete: vi.fn() }
+    const bucket = { delete: vi.fn(), list: vi.fn() }
 
     const result = await cleanupEventResources({
       client,
@@ -66,6 +66,7 @@ describe('Convex external cleanup', () => {
           throw new Error('R2 unavailable')
         }
       }),
+      list: vi.fn(async () => ({ objects: [], truncated: false })),
     }
 
     const failed = await cleanupEventResources({
@@ -80,7 +81,10 @@ describe('Convex external cleanup', () => {
       failedKeys: [failedKey],
     })
 
-    const retryBucket = { delete: vi.fn(async () => undefined) }
+    const retryBucket = {
+      delete: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ objects: [], truncated: false })),
+    }
     const retried = await cleanupEventResources({
       client,
       serviceSecret: 'worker-secret',
@@ -90,5 +94,43 @@ describe('Convex external cleanup', () => {
     })
     expect(retried).toMatchObject({ deleted: true, objectsDeleted: 1001 })
     expect(retryBucket.delete).toHaveBeenCalledTimes(2)
+  })
+
+  it('sweeps unconfirmed originals and callback-failed thumbnails before purge', async () => {
+    const orphanOriginal = 'events/evt_1234abcd/photo_unconfirmed.jpg'
+    const orphanThumbnail = 'events/evt_1234abcd/thumbs/800/photo_failed.jpg'
+    const client = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce(state())
+        .mockResolvedValueOnce({ ...state(), modalJobId: undefined }),
+      mutation: vi
+        .fn()
+        .mockResolvedValueOnce({ recorded: true })
+        .mockResolvedValueOnce({ deletedRecords: 1, eventDeleted: true }),
+    }
+    const bucket = {
+      list: vi.fn(async ({ cursor }: { cursor?: string }) =>
+        cursor
+          ? { objects: [{ key: orphanThumbnail }], truncated: false }
+          : { objects: [{ key: orphanOriginal }], truncated: true, cursor: 'page-2' },
+      ),
+      delete: vi.fn(async () => undefined),
+    }
+
+    const result = await cleanupEventResources({
+      client,
+      serviceSecret: 'worker-secret',
+      bucket,
+      eventId: 'evt_1234abcd',
+      cancelModalJob: vi.fn(async () => undefined),
+    })
+
+    expect(result?.deleted).toBe(true)
+    expect(bucket.list).toHaveBeenCalledWith({ prefix: 'events/evt_1234abcd/' })
+    expect(bucket.list).toHaveBeenCalledWith({ prefix: 'events/evt_1234abcd/', cursor: 'page-2' })
+    expect(bucket.delete).toHaveBeenCalledWith(
+      expect.arrayContaining([orphanOriginal, orphanThumbnail]),
+    )
   })
 })

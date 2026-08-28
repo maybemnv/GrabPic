@@ -18,7 +18,10 @@ describe('expired event cleanup', () => {
         .mockResolvedValueOnce({ deleting: true })
         .mockResolvedValueOnce({ deletedRecords: 2, eventDeleted: true }),
     }
-    const bucket = { delete: vi.fn(async () => undefined) }
+    const bucket = {
+      delete: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ objects: [], truncated: false })),
+    }
 
     const result = await cleanupExpiredEvents({
       client,

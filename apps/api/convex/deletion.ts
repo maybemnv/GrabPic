@@ -65,15 +65,21 @@ export const listCandidates = query({
       .query('events')
       .withIndex('by_status', (query) => query.eq('status', 'deleting'))
       .take(100)
-    const ids = new Set(deleting.map((event) => event.publicId))
-    if (ids.size < 100) {
-      const expired = await ctx.db
-        .query('events')
-        .withIndex('by_expires_at', (query) => query.lte('expiresAt', args.now))
-        .take(100 - ids.size)
-      for (const event of expired) ids.add(event.publicId)
+    const expired = await ctx.db
+      .query('events')
+      .withIndex('by_expires_at', (query) => query.lte('expiresAt', args.now))
+      .take(100)
+    const ids: string[] = []
+    const seen = new Set<string>()
+    for (let index = 0; index < 100 && ids.length < 100; index += 1) {
+      for (const event of [deleting[index], expired[index]]) {
+        if (event && !seen.has(event.publicId)) {
+          seen.add(event.publicId)
+          ids.push(event.publicId)
+        }
+      }
     }
-    return [...ids]
+    return ids
   },
 })
 
