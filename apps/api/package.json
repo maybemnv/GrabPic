@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "convex:codegen": "convex codegen",
+    "convex:deploy": "convex deploy",
+    "convex:dev": "convex dev",
     "dev": "wrangler dev src/index.ts",
     "deploy": "wrangler deploy src/index.ts",
     "lint": "tsc --noEmit"
@@ -13,6 +16,7 @@
     "@hono/zod-validator": "^0.2.0",
     "@libsql/client": "^0.14.0",
     "aws4fetch": "^1.0.20",
+    "convex": "^1.45.0",
     "hono": "^4.0.0",
     "qrcode": "^1.5.4",
     "zod": "^3.22.0"
