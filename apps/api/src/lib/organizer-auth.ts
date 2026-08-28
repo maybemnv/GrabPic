@@ -17,6 +17,14 @@ export async function hashOrganizerToken(token: string): Promise<string> {
   return toHex(new Uint8Array(digest))
 }
 
+export async function hashOrganizerAuthorization(
+  authorization: string | undefined,
+): Promise<string | null> {
+  if (!authorization?.startsWith('Bearer ')) return null
+  const token = authorization.slice('Bearer '.length)
+  return token ? hashOrganizerToken(token) : null
+}
+
 export async function verifyOrganizerToken(
   authorization: string | undefined,
   expectedHash: unknown,
