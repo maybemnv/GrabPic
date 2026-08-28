@@ -52,8 +52,10 @@ Modal must not receive `CONVEX_URL` or `CONVEX_SERVICE_SECRET`.
    Worker signer and Modal object reads/writes.
 4. Record the endpoint, bucket name, access key ID, and secret key in the
    secret stores listed above.
-5. Verify that originals and both thumbnail prefixes are retained:
-   `events/<event-id>/...`, `thumbs/200/`, and `thumbs/800/`.
+5. Verify the event-scoped keys used by the current implementation:
+   `events/<event-id>/<photo-id>.jpg` for originals,
+   `events/<event-id>/thumbs/200/<photo-id>.jpg` for 200px thumbnails, and
+   `events/<event-id>/thumbs/800/<photo-id>.jpg` for 800px thumbnails.
 
 Do not expose the bucket URL to clients; gallery and upload URLs must remain
 Worker-generated signed URLs.
@@ -110,6 +112,10 @@ without a job ID is not sufficient.
 
 Set non-secret production values through the Worker deployment configuration
 and secrets through Wrangler/provider secret storage. From `apps/api`, provide:
+
+Before deploying, ensure secret names are not also declared in
+`apps/api/wrangler.toml` `[vars]`. In particular, `MODAL_TOKEN` and `SENTRY_DSN`
+must be secret bindings only; an empty plaintext var can shadow the real secret.
 
 ```text
 CONVEX_URL=<production Convex URL>
@@ -189,9 +195,10 @@ and batched purge.
    measured results.
 2. Confirm there is one authoritative application database: Convex.
 3. Do not enable a Turso fallback, dual write, or runtime backend selector.
-4. After explicit sign-off, revoke any remaining Turso credentials and remove
+4. Attach the sign-off evidence to the immutable deployed/release SHA and
+   deployment record; PR state is not production evidence.
+5. After explicit sign-off, revoke any remaining Turso credentials and remove
    them from deployment dashboards and CI secret stores.
-5. Keep the draft refactor PR open until the deployed sign-off evidence is
-   attached. If any acceptance gate fails, stop the cutover and report the
-   failing measurement instead of routing production traffic through a
-   partially configured stack.
+6. If any acceptance gate fails, stop the cutover and report the failing
+   measurement instead of routing production traffic through a partially
+   configured stack.
