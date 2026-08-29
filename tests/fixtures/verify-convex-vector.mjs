@@ -75,6 +75,7 @@ async function seedEvent(publicId, passcode, inviteToken, photos, scores, jobPub
     serviceSecret,
     eventPublicId: publicId,
     jobPublicId,
+    attempt: 1,
     modalJobId: `modal_${jobPublicId}`,
     now,
   })
@@ -86,6 +87,7 @@ async function seedEvent(publicId, passcode, inviteToken, photos, scores, jobPub
       serviceSecret,
       eventPublicId: publicId,
       jobPublicId,
+      attempt: 1,
       final: false,
       now,
       photos: batch.map((item) => resultPhoto(publicId, item)),
@@ -103,6 +105,7 @@ async function seedEvent(publicId, passcode, inviteToken, photos, scores, jobPub
     serviceSecret,
     eventPublicId: publicId,
     jobPublicId,
+    attempt: 1,
     final: true,
     now,
     photos: photos.map((item) => resultPhoto(publicId, item)),

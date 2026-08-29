@@ -128,4 +128,23 @@ describe('Convex match access', () => {
     expect(candidates).toHaveLength(1)
     expect(candidates[0].photoId).toBe('photo_11111111')
   })
+
+  it('does not insert match metrics after the event is deleting or gone', async () => {
+    const t = convexTest(schema, modules)
+    const { first } = await seedEvents(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(first, { status: 'deleting' })
+    })
+
+    await t.mutation(internal.matches.recordSession, {
+      publicId: 'ms_deleting',
+      eventId: first,
+      matchedCount: 1,
+      similarityThreshold: 0.6,
+      durationMs: 10,
+      createdAt: 1_700_000_200,
+    })
+
+    expect(await t.run(async (ctx) => await ctx.db.query('matchSessions').collect())).toEqual([])
+  })
 })

@@ -1,6 +1,7 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import { eventByPublicId, requireActiveEvent, requireOrganizer } from './lib/events'
+import { appError } from './lib/errors'
 import { requireServiceSecret } from './lib/validation'
 
 const eventAccess = v.object({
@@ -47,25 +48,25 @@ export const create = mutation({
   returns: v.object({ eventId: v.string(), passcode: v.string(), inviteToken: v.string() }),
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
-    if (!/^evt_[a-z0-9]{8}$/.test(args.publicId)) throw new Error('INVALID_EVENT_ID')
-    if (!/^\d{6}$/.test(args.passcode)) throw new Error('INVALID_PASSCODE')
-    if (!/^[a-f0-9]{32}$/.test(args.inviteToken)) throw new Error('INVALID_INVITE_TOKEN')
-    if (args.organizerTokenHash.length !== 64) throw new Error('INVALID_ORGANIZER_TOKEN')
-    if (args.maxPhotos < 1 || !Number.isInteger(args.maxPhotos)) throw new Error('INVALID_LIMIT')
-    if (args.matchThreshold < 0 || args.matchThreshold > 1) throw new Error('INVALID_THRESHOLD')
-    if (args.clusteringEps <= 0 || args.clusteringEps > 1) throw new Error('INVALID_CLUSTERING_EPS')
+    if (!/^evt_[a-z0-9]{8}$/.test(args.publicId)) appError('INVALID_EVENT_ID')
+    if (!/^\d{6}$/.test(args.passcode)) appError('INVALID_PASSCODE')
+    if (!/^[a-f0-9]{32}$/.test(args.inviteToken)) appError('INVALID_INVITE_TOKEN')
+    if (args.organizerTokenHash.length !== 64) appError('INVALID_ORGANIZER_TOKEN')
+    if (args.maxPhotos < 1 || !Number.isInteger(args.maxPhotos)) appError('INVALID_LIMIT')
+    if (args.matchThreshold < 0 || args.matchThreshold > 1) appError('INVALID_THRESHOLD')
+    if (args.clusteringEps <= 0 || args.clusteringEps > 1) appError('INVALID_CLUSTERING_EPS')
 
-    if (await eventByPublicId(ctx, args.publicId)) throw new Error('EVENT_ID_CONFLICT')
+    if (await eventByPublicId(ctx, args.publicId)) appError('EVENT_ID_CONFLICT')
     const passcode = await ctx.db
       .query('events')
       .withIndex('by_passcode', (query) => query.eq('passcode', args.passcode))
       .first()
-    if (passcode) throw new Error('PASSCODE_CONFLICT')
+    if (passcode) appError('PASSCODE_CONFLICT')
     const invite = await ctx.db
       .query('events')
       .withIndex('by_invite_token', (query) => query.eq('inviteToken', args.inviteToken))
       .first()
-    if (invite) throw new Error('INVITE_TOKEN_CONFLICT')
+    if (invite) appError('INVITE_TOKEN_CONFLICT')
 
     await ctx.db.insert('events', {
       publicId: args.publicId,

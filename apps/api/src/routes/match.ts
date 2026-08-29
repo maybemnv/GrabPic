@@ -87,23 +87,24 @@ app.post('/', async (c) => {
       embedding: Array.from(selfieEmbedding),
     })
 
-    const matches = []
-    for (const match of search.matches) {
-      const [url, thumbnailUrl] = await Promise.all([
-        createSignedR2Url(c.env, match.originalKey, 'GET', 300),
-        createSignedR2Url(c.env, match.thumbnail800Key, 'GET', 300),
-      ])
+    const matches = await Promise.all(
+      search.matches.map(async (match) => {
+        const [url, thumbnailUrl] = await Promise.all([
+          createSignedR2Url(c.env, match.originalKey, 'GET', 300),
+          createSignedR2Url(c.env, match.thumbnail800Key, 'GET', 300),
+        ])
 
-      matches.push({
-        photoId: match.photoId,
-        similarity: match.score,
-        url,
-        thumbnailUrl,
-        width: match.width ?? 0,
-        height: match.height ?? 0,
-        faces: [{ bbox: match.bbox, isMatch: true }],
-      })
-    }
+        return {
+          photoId: match.photoId,
+          similarity: match.score,
+          url,
+          thumbnailUrl,
+          width: match.width ?? 0,
+          height: match.height ?? 0,
+          faces: [{ bbox: match.bbox, isMatch: true }],
+        }
+      }),
+    )
 
     const matchedCount = matches.length
     const processingTime = Date.now() - startTime

@@ -4,7 +4,12 @@ import type { QueryCtx } from './_generated/server'
 import type { Id } from './_generated/dataModel'
 import { internal } from './_generated/api'
 import { eventByPublicId } from './lib/events'
-import { requireServiceSecret, validateNormalizedEmbedding } from './lib/validation'
+import { appError } from './lib/errors'
+import {
+  requireServiceSecret,
+  timingSafeEqual,
+  validateNormalizedEmbedding,
+} from './lib/validation'
 import { selectVectorMatches } from './lib/vectorMatching'
 
 const accessArgs = {
@@ -44,12 +49,12 @@ async function requireMatchEvent(
   },
 ) {
   const event = await eventByPublicId(ctx, args.eventPublicId)
-  if (!event) throw new Error('EVENT_NOT_FOUND')
+  if (!event) appError('EVENT_NOT_FOUND')
   const authorized =
-    (args.passcode !== undefined && args.passcode === event.passcode) ||
-    (args.inviteToken !== undefined && args.inviteToken === event.inviteToken)
-  if (!authorized) throw new Error('UNAUTHORIZED')
-  if (event.status !== 'ready' || event.expiresAt <= args.now) throw new Error('NOT_READY')
+    (args.passcode !== undefined && timingSafeEqual(args.passcode, event.passcode)) ||
+    (args.inviteToken !== undefined && timingSafeEqual(args.inviteToken, event.inviteToken))
+  if (!authorized) appError('UNAUTHORIZED')
+  if (event.status !== 'ready' || event.expiresAt <= args.now) appError('NOT_READY')
   return event
 }
 
@@ -99,7 +104,7 @@ export const loadCandidates = internalQuery({
   ),
   handler: async (ctx, args) => {
     const event = await ctx.db.get(args.eventId)
-    if (!event) throw new Error('EVENT_NOT_FOUND')
+    if (!event) appError('EVENT_NOT_FOUND')
 
     const loaded = await Promise.all(
       args.candidates.map(async ({ faceId, score }) => {
@@ -134,6 +139,8 @@ export const recordSession = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event || event.status === 'deleting') return null
     await ctx.db.insert('matchSessions', args)
     return null
   },

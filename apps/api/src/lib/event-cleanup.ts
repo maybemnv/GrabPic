@@ -3,6 +3,11 @@ import { api } from '../../convex/_generated/api'
 
 interface ObjectStore {
   delete(keys: string | string[]): Promise<void>
+  list(options: { prefix: string; cursor?: string }): Promise<{
+    objects: Array<{ key: string }>
+    truncated: boolean
+    cursor?: string
+  }>
 }
 
 interface Logger {
@@ -78,8 +83,36 @@ export async function cleanupEventResources({
       return failureResult(state, [], 0)
     }
   }
+  if (state.modalDispatchUnresolved && !state.modalJobId) {
+    await recordFailure(client, serviceSecret, eventId, 'Modal dispatch unresolved')
+    log?.error('event: Modal dispatch unresolved', { eventId })
+    sentry?.captureMessage('Event Modal dispatch unresolved', { eventId })
+    return failureResult(state, [], 0)
+  }
 
-  const batches = chunk(state.objectKeys, 1000)
+  const eventPrefix = `events/${eventId}/`
+  const objectKeys = new Set(state.objectKeys)
+  try {
+    let cursor: string | undefined
+    while (true) {
+      const page = await bucket.list({
+        prefix: eventPrefix,
+        ...(cursor ? { cursor } : {}),
+      })
+      for (const object of page.objects) objectKeys.add(object.key)
+      if (!page.truncated) break
+      if (!page.cursor || page.cursor === cursor) throw new Error('R2_LIST_STALLED')
+      cursor = page.cursor
+    }
+  } catch {
+    await recordFailure(client, serviceSecret, eventId, 'R2 asset listing failed')
+    log?.error('event: R2 asset listing failed', { eventId })
+    sentry?.captureMessage('Event R2 asset listing failed', { eventId })
+    return failureResult(state, [...objectKeys], 0)
+  }
+
+  const allObjectKeys = [...objectKeys]
+  const batches = chunk(allObjectKeys, 1000)
   const deletionResults = await Promise.allSettled(batches.map((keys) => bucket.delete(keys)))
   const failedKeys = deletionResults.flatMap((result, index) =>
     result.status === 'rejected' ? batches[index] : [],
@@ -88,7 +121,7 @@ export async function cleanupEventResources({
     await recordFailure(client, serviceSecret, eventId, 'R2 asset deletion failed')
     log?.error('event: R2 asset deletion failed', { eventId, failedKeys })
     sentry?.captureMessage('Event R2 asset deletion failed', { eventId, failedKeys })
-    return failureResult(state, failedKeys, state.objectKeys.length - failedKeys.length)
+    return failureResult(state, failedKeys, allObjectKeys.length - failedKeys.length)
   }
 
   try {
@@ -110,14 +143,14 @@ export async function cleanupEventResources({
   log?.info('event: cleanup complete', {
     eventId,
     photosDeleted: state.photoCount,
-    objectsDeleted: state.objectKeys.length,
+    objectsDeleted: allObjectKeys.length,
     storageFreed: state.storageBytes,
   })
   return {
     deleted: true,
     photosDeleted: state.photoCount,
     storageFreed: state.storageBytes,
-    objectsDeleted: state.objectKeys.length,
+    objectsDeleted: allObjectKeys.length,
     failedKeys: [],
   }
 }

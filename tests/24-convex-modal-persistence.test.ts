@@ -52,6 +52,7 @@ async function acceptedJob(t: ReturnType<typeof convexTest>) {
     serviceSecret,
     eventPublicId: 'evt_1234abcd',
     jobPublicId: 'job_1',
+    attempt: 1,
     modalJobId: 'modal_1',
     now: 1_700_000_101,
   })
@@ -62,6 +63,7 @@ function resultArgs(final = false) {
     serviceSecret,
     eventPublicId: 'evt_1234abcd',
     jobPublicId: 'job_1',
+    attempt: 1,
     final,
     now: 1_700_000_200,
     photos: [
@@ -155,6 +157,20 @@ describe('Convex Modal result persistence', () => {
     ).rejects.toThrow('PHOTO_NOT_IN_JOB')
   })
 
+  it('rejects faces that are not included in the current callback photo batch', async () => {
+    const t = convexTest(schema, modules)
+    await acceptedJob(t)
+
+    await expect(
+      t.mutation(api.processing.persistResults, {
+        ...resultArgs(),
+        photos: [],
+      }),
+    ).rejects.toThrow('PHOTO_NOT_IN_JOB')
+
+    expect(await t.run(async (ctx) => await ctx.db.query('faces').collect())).toEqual([])
+  })
+
   it('rejects wrong-event and stale-job payloads', async () => {
     const t = convexTest(schema, modules)
     await acceptedJob(t)
@@ -183,6 +199,7 @@ describe('Convex Modal result persistence', () => {
       serviceSecret,
       eventPublicId: 'evt_1234abcd',
       jobPublicId: 'job_1',
+      attempt: 1,
       sanitizedError: 'Modal processing failed',
       now: 1_700_000_200,
     })
@@ -202,7 +219,7 @@ describe('Convex Modal result persistence', () => {
       ],
     })
 
-    expect(retry).toEqual({ jobId: 'job_1', shouldDispatch: true })
+    expect(retry).toEqual({ jobId: 'job_1', attempt: 2, shouldDispatch: true })
     const state = await t.run(async (ctx) => ({
       event: await ctx.db.query('events').first(),
       jobs: await ctx.db.query('processingJobs').collect(),
@@ -211,5 +228,37 @@ describe('Convex Modal result persistence', () => {
     expect(state.event?.status).toBe('processing')
     expect(state.jobs).toHaveLength(1)
     expect(state.photos).toHaveLength(1)
+  })
+
+  it('rejects a delayed callback from a previous processing attempt', async () => {
+    const t = convexTest(schema, modules)
+    await acceptedJob(t)
+    await t.mutation(api.processing.markProcessingFailed, {
+      serviceSecret,
+      eventPublicId: 'evt_1234abcd',
+      jobPublicId: 'job_1',
+      attempt: 1,
+      sanitizedError: 'Modal processing failed',
+      now: 1_700_000_200,
+    })
+    const retry = await t.mutation(api.uploads.confirm, {
+      serviceSecret,
+      eventPublicId: 'evt_1234abcd',
+      organizerTokenHash: 'a'.repeat(64),
+      jobPublicId: 'job_2',
+      now: 1_700_000_300,
+      photos: [
+        {
+          publicId: 'photo_1234abcd',
+          originalKey: 'events/evt_1234abcd/photo_1234abcd.jpg',
+          fileSize: 1024,
+        },
+      ],
+    })
+    expect(retry).toMatchObject({ jobId: 'job_1', shouldDispatch: true, attempt: 2 })
+
+    await expect(
+      t.mutation(api.processing.persistResults, { ...resultArgs(), attempt: 1 }),
+    ).rejects.toThrow('STALE_JOB')
   })
 })

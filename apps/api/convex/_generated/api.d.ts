@@ -10,6 +10,7 @@
 
 import type * as deletion from "../deletion.js";
 import type * as events from "../events.js";
+import type * as lib_errors from "../lib/errors.js";
 import type * as lib_events from "../lib/events.js";
 import type * as lib_validation from "../lib/validation.js";
 import type * as lib_vectorMatching from "../lib/vectorMatching.js";
@@ -27,6 +28,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   deletion: typeof deletion;
   events: typeof events;
+  "lib/errors": typeof lib_errors;
   "lib/events": typeof lib_events;
   "lib/validation": typeof lib_validation;
   "lib/vectorMatching": typeof lib_vectorMatching;

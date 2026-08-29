@@ -86,6 +86,8 @@ service secret. Never log function arguments containing embeddings or secrets.
   accept the request, return the documented failure status (preferably `502`),
   retain the Convex job in an observable retryable state, do not mark the event
   ready, and do not silently swallow the trigger failure.
+- Carry the current processing attempt identity through the Modal request and
+  every callback so delayed results from a prior retry are rejected.
 - Keep the organizer's existing five-second polling flow.
 
 ### 4. Replace the similarity scan
@@ -111,9 +113,10 @@ fixtures must prove that required results are not lost.
   normalization, clustering, thumbnail generation, and stable R2 key scheme.
 - Add a private Hono callback authenticated by a dedicated
   `MODAL_CALLBACK_TOKEN`.
-- Modal sends idempotent result batches containing job/event IDs, photo
-  metadata, thumbnail keys, and no more than 25 faces per batch. Each face
-  contains its ID, box, confidence, cluster, landmarks, and 512-number vector.
+- Modal sends idempotent result batches containing job/event IDs, processing
+  attempt identity, photo metadata, thumbnail keys, and no more than 25 faces
+  per batch. Each face contains its ID, box, confidence, cluster, landmarks,
+  and 512-number vector.
 - Callback bodies containing embeddings, embeddings themselves, and service
   secrets must never be logged or attached to Sentry/error metadata.
 - Worker validation must require the callback job ID and event ID to agree with
@@ -136,7 +139,8 @@ Keep the Cloudflare scheduled Worker as the external-side-effect coordinator:
 
 1. Mark the event `deleting`, excluding it from lookup, upload, and matching.
 2. Cancel queued/running Modal work using the production cancellation contract.
-3. Read all event R2 keys from Convex and delete originals and both thumbnails.
+3. Read known keys from Convex, then paginate a final `events/<eventId>/` R2
+   prefix sweep before deleting originals and both thumbnails.
 4. On any cancellation or R2 failure, retain records, record attempts/error,
    report to Sentry, and retry later.
 5. Purge faces, photos, sessions, and processing jobs in bounded batches of 500,
@@ -183,7 +187,7 @@ idempotent upload confirmation, exactly-one processing-job creation,
 explicit Modal acceptance before `202`, trigger failure status and retryable
 job state, invite/passcode lookup, event-filtered vector search, threshold
 boundaries, ranking, deduplication, malformed vectors, Modal batch validation,
-duplicate callbacks, wrong-event callbacks, stale-job rejection,
+duplicate callbacks, wrong-event callbacks, stale-attempt rejection,
 callback-after-deletion rejection, processing completion/failure, no raw
 IP/vector persistence, partial R2 deletion, cancellation failure, retry,
 batched purge, expiry, and signed R2 delivery.

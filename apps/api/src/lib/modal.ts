@@ -8,17 +8,20 @@ export interface ProcessingPhoto {
 export interface ProcessingRequest {
   job_id: string
   event_id: string
+  attempt: number
   photos: Array<{ photo_id: string; r2_key: string }>
 }
 
 export function buildProcessingRequest(
   jobId: string,
   eventId: string,
+  attempt: number,
   photos: ProcessingPhoto[],
 ): ProcessingRequest {
   return {
     job_id: jobId,
     event_id: eventId,
+    attempt,
     photos: photos.map(({ id, r2Key }) => ({ photo_id: id, r2_key: r2Key })),
   }
 }
