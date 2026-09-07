@@ -12,7 +12,7 @@ export function generatePasscode(
 }
 
 function isPasscodeConflict(error: unknown): boolean {
-  return /unique constraint failed:\s*events\.passcode/i.test(String(error))
+  return /unique constraint failed:\s*events\.passcode|PASSCODE_CONFLICT/i.test(String(error))
 }
 
 export async function insertEventWithUniquePasscode(

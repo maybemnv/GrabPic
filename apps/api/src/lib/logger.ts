@@ -27,6 +27,19 @@ function structuredLog(level: LogLevel, message: string, meta?: Record<string, u
   }
 }
 
+export function sanitizeRequestPath(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl)
+    const segments = url.pathname.split('/')
+    for (let index = 1; index < segments.length; index += 1) {
+      if (segments[index - 1] === 'invite') segments[index] = '[redacted]'
+    }
+    return segments.join('/')
+  } catch {
+    return '[invalid-url]'
+  }
+}
+
 export function createLogger(level?: string) {
   const currentLevel = getLevel(level)
 

@@ -1,0 +1,12 @@
+# Copy to apps/api/.dev.vars for local Wrangler only. Never commit the copy.
+CONVEX_URL=http://127.0.0.1:3210
+CONVEX_SERVICE_SECRET=local-test-secret
+R2_ENDPOINT=http://127.0.0.1:9000
+R2_BUCKET=grabpic-local
+R2_ACCESS_KEY_ID=local
+R2_SECRET_ACCESS_KEY=local
+MODAL_TOKEN=local-test-token
+MODAL_CALLBACK_TOKEN=local-callback-token
+MODAL_WEBHOOK_URL=http://127.0.0.1:8787/test/modal/process
+MODAL_CANCEL_URL=http://127.0.0.1:8787/test/modal/cancel
+MODAL_EMBEDDING_URL=http://127.0.0.1:8787/test/modal/embed

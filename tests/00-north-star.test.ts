@@ -1,16 +1,20 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { getApiBaseUrl, getDb, isSkippable } from './helpers/setup'
+import { describe, it, expect, afterAll } from 'vitest'
+import { getApiBaseUrl, isSkippable } from './helpers/setup'
 
 const NORTH_STAR_TARGET_MS = 5000
 
 describe.skipIf(isSkippable())('North Star Metric: Selfie → Gallery <5s', () => {
-  const eventId = `north_star_${Date.now()}`
-  const passcode = String(100000 + Math.floor(Math.random() * 900000))
+  let eventId = ''
+  let passcode = ''
+  let organizerToken = ''
   const api = () => getApiBaseUrl()
 
   afterAll(async () => {
     try {
-      await fetch(`${api()}/events/${eventId}`, { method: 'DELETE' })
+      await fetch(`${api()}/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${organizerToken}` },
+      })
     } catch {
       /* cleanup best-effort */
     }
@@ -29,8 +33,11 @@ describe.skipIf(isSkippable())('North Star Metric: Selfie → Gallery <5s', () =
     })
     expect(res.status).toBe(201)
     const body = await res.json()
-    expect(body.eventId).toBeDefined()
-    expect(body.passcode).toMatch(/^\d{6}$/)
+    eventId = body.eventId
+    passcode = body.passcode
+    organizerToken = body.organizerToken
+    expect(eventId).toBeDefined()
+    expect(passcode).toMatch(/^\d{6}$/)
   })
 
   it('match endpoint responds within 5 seconds (no-matches case)', async () => {
@@ -57,7 +64,9 @@ describe.skipIf(isSkippable())('North Star Metric: Selfie → Gallery <5s', () =
   })
 
   it('event status endpoint returns correct shape', async () => {
-    const res = await fetch(`${api()}/events/${eventId}/status`)
+    const res = await fetch(`${api()}/events/${eventId}/status`, {
+      headers: { Authorization: `Bearer ${organizerToken}` },
+    })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toHaveProperty('status')
@@ -66,13 +75,11 @@ describe.skipIf(isSkippable())('North Star Metric: Selfie → Gallery <5s', () =
     expect(body).toHaveProperty('faceCount')
   })
 
-  it('event stored in Turso with correct data', async () => {
-    const db = getDb()
-    const result = await db.execute({
-      sql: 'SELECT id, name, status FROM events WHERE id = ?',
-      args: [eventId],
+  it('organizer detail returns the persisted event contract', async () => {
+    const res = await fetch(`${api()}/events/${eventId}`, {
+      headers: { Authorization: `Bearer ${organizerToken}` },
     })
-    expect(result.rows.length).toBe(1)
-    expect(result.rows[0].id).toBe(eventId)
+    expect(res.status).toBe(200)
+    expect((await res.json()).id).toBe(eventId)
   })
 })

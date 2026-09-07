@@ -16,11 +16,10 @@
 - [x] ApiError, BBox, FaceLandmarks types
 - [x] Zod schema validation in API routes
 
-### packages/db
-- [x] Turso schema: events, photos, faces, face_embeddings, match_sessions
-- [x] DB client factory (createDbClient)
-- [x] Migration runner (migrate function)
-- [x] Indexes on passcode, status, expires_at, photo_id, cluster_id, event_id
+### apps/api/convex
+- [x] Convex schema: events, photos, faces, match sessions, processing jobs
+- [x] Event-filtered 512-dimensional face vector index
+- [x] Typed queries, mutations, actions, and Worker service-secret boundary
 
 ### packages/config
 - [x] Shared tsconfig.base.json
@@ -64,10 +63,10 @@
 
 ### Infrastructure
 - [x] Hono.js app with CORS + logger middleware
-- [x] Env interface (PHOTOS R2 bucket, TURSO, MODAL, LOG_LEVEL)
+- [x] Env interface (PHOTOS R2 bucket, Convex, Modal, LOG_LEVEL)
 - [x] wrangler.toml with R2 binding
-- [x] wrangler.toml — remove unused D1 binding
-- [ ] Configure MODAL_TOKEN, MODAL_WEBHOOK_URL, MODAL_EMBEDDING_URL, and R2 signing secrets
+- [x] wrangler.toml — no database binding
+- [ ] Configure Convex, Modal, and R2 deployment secrets
 
 ## Frontend (apps/web)
 
@@ -105,7 +104,7 @@
 - [x] MTCNN face detection (GPU)
 - [x] FaceNet `InceptionResnetV1(pretrained="vggface2")` 512-dim embedding generation
 - [x] DBSCAN clustering (eps=0.4, min_samples=2)
-- [x] Turso storage (faces + embeddings)
+- [x] Worker callback persistence (faces + embeddings in Convex)
 - [x] Event status update after processing
 - [x] requirements.txt with pinned versions
 - [ ] Deploy Modal function to production
@@ -113,11 +112,9 @@
 
 ## Infrastructure Provisioning
 
-### Turso Database
-- [ ] Create Turso DB (`turso db create grabpic-dev`)
-- [ ] Run migration (schema create tables)
-- [ ] Store TURSO_URL + TURSO_TOKEN in .env
-- [ ] Configure Turso credentials as Modal secret
+### Convex Database
+- [x] Define and validate the Convex schema/functions locally
+- [ ] Deploy Convex functions and set the service secret
 
 ### Cloudflare R2
 - [ ] Create R2 bucket (`wrangler r2 bucket create grabpic-photos`)
@@ -129,13 +126,13 @@
 - [ ] Deploy API (`wrangler deploy`)
 - [ ] Configure Worker vars/secrets (Modal URLs/token, R2 endpoint/bucket/signing keys)
 - [ ] Set up custom domain (api.grabpic.app)
-- [ ] Configure 30-day expiry cron job
+- [ ] Configure 30-day expiry cron job and validate cleanup
 
 ### Modal.com
 - [ ] Create Modal account
 - [ ] Set up Modal CLI + token
-- [ ] Create turso-credentials secret in Modal
-- [ ] Deploy grabpic-processor function
+- [ ] Configure R2 and callback secrets in Modal
+- [ ] Deploy the processor and cancellation endpoint
 
 ### Vercel
 - [ ] Deploy frontend
@@ -153,7 +150,7 @@
 - [x] 04-photo-throughput.test.ts — signed URL upload flow
 - [x] 05-secondary-metrics.test.ts — analytics tracking
 - [x] 06-contracts.test.ts — type shape validation
-- [x] helpers/setup.ts — real infra env loading + clients
+- [x] helpers/setup.ts — opt-in local/deployed infrastructure env loading
 - [x] helpers/benchmark.ts — latency measurement utilities
 - [ ] Run full test suite against production infra
 - [ ] Add CI pipeline (GitHub Actions)

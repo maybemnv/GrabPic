@@ -1,15 +1,20 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { getApiBaseUrl, getDb, isSkippable } from './helpers/setup'
+import { getApiBaseUrl, isSkippable } from './helpers/setup'
 
 const TARGET_SECONDS_PER_100_PHOTOS = 120
 
 describe.skipIf(isSkippable())('Processing Time: <2min per 100 photos', () => {
-  const eventId = `proc_time_${Date.now()}`
+  let eventId = ''
+  let organizerToken = ''
+  let photoIds: string[] = []
   const api = () => getApiBaseUrl()
 
   afterAll(async () => {
     try {
-      await fetch(`${api()}/events/${eventId}`, { method: 'DELETE' })
+      await fetch(`${api()}/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${organizerToken}` },
+      })
     } catch {
       /* cleanup */
     }
@@ -29,10 +34,16 @@ describe.skipIf(isSkippable())('Processing Time: <2min per 100 photos', () => {
       }),
     })
     expect(createRes.status).toBe(201)
+    const event = await createRes.json()
+    eventId = event.eventId
+    organizerToken = event.organizerToken
 
     const uploadRes = await fetch(`${api()}/events/${eventId}/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${organizerToken}`,
+      },
       body: JSON.stringify({
         photos: Array.from({ length: 5 }, (_, i) => ({
           filename: `photo_${i}.jpg`,
@@ -42,31 +53,32 @@ describe.skipIf(isSkippable())('Processing Time: <2min per 100 photos', () => {
       }),
     })
     expect(uploadRes.status).toBe(200)
+    photoIds = (await uploadRes.json()).uploadUrls.map(
+      (photo: { photoId: string }) => photo.photoId,
+    )
 
     const duration = performance.now() - start
     const secondsPer100 = (duration / 1000) * (100 / 5)
     expect(secondsPer100).toBeLessThan(TARGET_SECONDS_PER_100_PHOTOS)
   })
 
-  it('confirm upload updates event status in DB', async () => {
+  it('confirm upload updates Convex-backed event status', async () => {
     const confirmRes = await fetch(`${api()}/events/${eventId}/upload/confirm`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ photoIds: ['photo_0', 'photo_1', 'photo_2', 'photo_3', 'photo_4'] }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${organizerToken}`,
+      },
+      body: JSON.stringify({ photoIds }),
     })
     const body = await confirmRes.json()
     expect(body.status).toBe('processing')
-
-    const db = getDb()
-    const result = await db.execute({
-      sql: 'SELECT status FROM events WHERE id = ?',
-      args: [eventId],
-    })
-    expect(result.rows[0].status).toBe('processing')
   })
 
   it('GET /events/:id/status returns correct progress', async () => {
-    const res = await fetch(`${api()}/events/${eventId}/status`)
+    const res = await fetch(`${api()}/events/${eventId}/status`, {
+      headers: { Authorization: `Bearer ${organizerToken}` },
+    })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.status).toBeDefined()

@@ -1,74 +1,40 @@
-# GrabPic - Development Environment Setup
+# Development Environment
 
-**Version:** 1.0
-**Date:** February 9, 2026
-**Owner:** Product Engineering
-**Status:** Planning Phase
+## Requirements
 
----
+- Node.js 20+
+- pnpm 10+
+- Python 3.11 for the Modal processor
+- A local Convex deployment for API development
 
-## Prerequisites
+## Local setup
+
 ```bash
-# Node.js (v20+)
-node --version  # v20.10.0
-
-# pnpm (faster than npm)
-npm install -g pnpm
-
-# Wrangler (Cloudflare CLI)
-npm install -g wrangler
-
-# Modal CLI
-pip install modal
+pnpm install
+cp .env.example .env
+pnpm --filter @grabpic/api convex:dev
+pnpm --filter @grabpic/api dev
+pnpm --filter @grabpic/web dev
 ```
 
-## Monorepo Structure
-```
-GrabPic/
-├── apps/
-│   ├── web/                 # Next.js frontend
-│   │   ├── src/
-│   │   │   ├── app/         # App router
-│   │   │   ├── components/  # React components
-│   │   │   └── lib/         # Utilities
-│   │   └── package.json
-│   └── api/                 # Cloudflare Workers
-│       ├── src/
-│       │   ├── routes/      # API endpoints
-│       │   └── index.ts     # Hono app
-│       └── wrangler.toml
-├── packages/
-│   ├── db/                  # Turso client & schema
-│   ├── types/               # Shared TypeScript types
-│   └── config/              # Shared configs (tsconfig, eslint)
-├── ml/
-│   ├── processor.py         # Modal functions
-│   └── requirements.txt
-├── pnpm-workspace.yaml
-└── package.json
-```
+Use `tests/local.env.example` as the opt-in template for local infrastructure
+tests. Do not commit filled env files.
 
-## Initial Setup Commands
+## Workspace boundaries
+
+`apps/api` owns Hono routes and Convex functions. `apps/web` owns the UI.
+`packages/types` contains cross-application contracts; shared packages must
+not import from `apps/*`. `ml/processor.py` is the Modal-only ML entry point.
+
+## Checks
+
 ```bash
-# Create monorepo
-pnpm init
-pnpm add -Dw turbo typescript
-
-# Create Next.js app
-cd apps/web
-pnpm create next-app@latest . --typescript --tailwind --app
-
-# Create Cloudflare Worker
-cd apps/api
-pnpm create cloudflare@latest . -- --framework=hono
-
-# Setup Turso
-brew install tursodatabase/tap/turso
-turso auth signup
-turso db create GrabPic-dev
-turso db show GrabPic-dev  # Get URL + token
-
-# Setup Modal
-modal setup
-modal token new
+pnpm lint
+pnpm build
+pnpm vitest run
+python -m unittest ml/test_processor.py
+python -m compileall ml
 ```
+
+The deterministic Convex tests do not need cloud credentials. Deployed-path
+tests run only when `RUN_REAL_INFRA_TESTS=1` is explicitly enabled.

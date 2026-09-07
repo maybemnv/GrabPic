@@ -1,12 +1,16 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { api } from '../convex/_generated/api'
 import { events } from './routes/events'
 import { match } from './routes/match'
 import { upload } from './routes/upload'
 import { qr } from './routes/qr'
-import { createLogger } from './lib/logger'
+import { modalCallback } from './routes/modal-callback'
+import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
+import { createConvexClient } from './lib/convex'
+import { requestProcessingCancellation } from './lib/modal'
 
 export interface Env {
   PHOTOS: R2Bucket
@@ -18,11 +22,13 @@ export interface Env {
   LOG_LEVEL: string
   SENTRY_DSN: string
   MODAL_TOKEN: string
+  MODAL_CALLBACK_TOKEN: string
   MODAL_WEBHOOK_URL: string
+  MODAL_CANCEL_URL: string
   MODAL_EMBEDDING_URL: string
   MATCH_THRESHOLD: string
-  TURSO_URL: string
-  TURSO_TOKEN: string
+  CONVEX_URL: string
+  CONVEX_SERVICE_SECRET: string
 }
 
 export interface AppVariables {
@@ -37,7 +43,18 @@ export type AppContext = {
 
 const app = new Hono<AppContext>()
 
-app.use('/*', cors())
+const browserCors = cors({
+  origin: ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000'],
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+})
+
+app.use('/events', browserCors)
+app.use('/events/*', browserCors)
+app.use('/health', browserCors)
+app.use('/health/*', browserCors)
+app.use('/qr', browserCors)
+app.use('/qr/*', browserCors)
 
 app.use('*', async (c, next) => {
   const start = Date.now()
@@ -46,12 +63,15 @@ app.use('*', async (c, next) => {
   await next()
   const ms = Date.now() - start
   const log = c.get('logger')
-  log.info(`${c.req.method} ${c.req.url}`, { status: c.res.status, duration: ms })
+  log.info(`${c.req.method} ${sanitizeRequestPath(c.req.url)}`, {
+    status: c.res.status,
+    duration: ms,
+  })
 })
 
 app.onError((err, c) => {
   const sentry = c.get('sentry')
-  sentry.captureException(err, { path: c.req.url, method: c.req.method })
+  sentry.captureException(err, { path: sanitizeRequestPath(c.req.url), method: c.req.method })
   return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
 })
 
@@ -59,16 +79,15 @@ app.route('/events', events)
 app.route('/events/:eventId/match', match)
 app.route('/events/:eventId/upload', upload)
 app.route('/qr', qr)
+app.route('/internal/modal', modalCallback)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
 app.get('/health/processing', async (c) => {
   try {
-    const db = (await import('@libsql/client')).createClient({
-      url: c.env.TURSO_URL,
-      authToken: c.env.TURSO_TOKEN,
+    await createConvexClient(c.env).query(api.system.health, {
+      serviceSecret: c.env.CONVEX_SERVICE_SECRET,
     })
-    await db.execute('SELECT 1')
     return c.json({ status: 'ok', database: 'connected' })
   } catch {
     return c.json({ status: 'error', database: 'disconnected' }, 503)
@@ -82,20 +101,22 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
   ctx.waitUntil(
     (async () => {
       try {
+        const client = createConvexClient(env)
         await cleanupExpiredEvents({
-          url: env.TURSO_URL,
-          authToken: env.TURSO_TOKEN,
+          client,
+          serviceSecret: env.CONVEX_SERVICE_SECRET,
           bucket: env.PHOTOS,
+          cancelModalJob: (modalJobId) =>
+            requestProcessingCancellation(env.MODAL_CANCEL_URL, env.MODAL_TOKEN, modalJobId),
           log,
           sentry,
         })
-      } catch (err) {
+      } catch {
         log.error('cron: expired event cleanup failed', {
           cron: controller.cron,
           scheduledTime: controller.scheduledTime,
-          error: String(err),
         })
-        sentry.captureException(err, {
+        sentry.captureMessage('Expired event cleanup run failed', {
           cron: controller.cron,
           scheduledTime: controller.scheduledTime,
         })

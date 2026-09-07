@@ -1,101 +1,47 @@
-# GrabPic - Database Schema Deep Dive
+# Convex Data Model
 
-**Version:** 1.0
-**Date:** February 9, 2026
-**Owner:** Product Engineering
-**Status:** Planning Phase
+The schema is implemented in `apps/api/convex/schema.ts`. Public IDs are
+stored alongside Convex references; `_id` values never cross the Worker
+boundary.
 
----
+## Events
 
-## Events Table
-```sql
-CREATE TABLE events (
-  id TEXT PRIMARY KEY,                    -- UUID v4
-  name TEXT NOT NULL,                     -- "Sarah's Wedding"
-  passcode TEXT NOT NULL,                 -- 6-digit numeric
-  created_at INTEGER NOT NULL,            -- Unix timestamp
-  expires_at INTEGER NOT NULL,            -- created_at + 30 days
-  status TEXT DEFAULT 'processing',       -- processing|ready|expired|failed
-  photo_count INTEGER DEFAULT 0,
-  face_count INTEGER DEFAULT 0,
-  organizer_email TEXT,
-  organizer_name TEXT,
-  max_photos INTEGER DEFAULT 1000,
-  tier TEXT DEFAULT 'free'               -- free|pro
-);
+`publicId`, name, passcode, opaque invite token, organizer token hash, created
+and expiry timestamps, processing/deletion status, photo and face counts,
+organizer metadata, `maxPhotos`, tier, match threshold, clustering epsilon,
+and retryable deletion state.
 
-CREATE INDEX idx_events_passcode ON events(passcode);
-CREATE INDEX idx_events_status ON events(status);
-CREATE INDEX idx_events_expires_at ON events(expires_at);
-```
+Indexes: public ID, passcode, invite token, expiry, and status.
 
-## Photos Table
-```sql
-CREATE TABLE photos (
-  id TEXT PRIMARY KEY,                    -- UUID v4
-  event_id TEXT NOT NULL,
-  r2_key TEXT NOT NULL,                   -- Original: events/{event_id}/{photo_id}.jpg
-  thumbnail_200_key TEXT,                 -- Thumb: events/{event_id}/thumbs/200/{photo_id}.jpg
-  thumbnail_800_key TEXT,
-  uploaded_at INTEGER NOT NULL,
-  width INTEGER,
-  height INTEGER,
-  file_size INTEGER,                      -- Bytes
-  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-);
+## Photos
 
-CREATE INDEX idx_photos_event ON photos(event_id);
-```
+`publicId`, event reference, original R2 key, optional 200px/800px thumbnail
+keys, upload timestamp, dimensions, file size, processing state, and face
+count. Indexes support event listing and event/public-ID lookup.
 
-## Faces Table
-```sql
-CREATE TABLE faces (
-  id TEXT PRIMARY KEY,                    -- UUID v4
-  photo_id TEXT NOT NULL,
-  bbox TEXT NOT NULL,                     -- JSON: {"x": 120, "y": 80, "width": 100, "height": 120}
-  confidence REAL NOT NULL,               -- 0.0 to 1.0
-  cluster_id TEXT,                        -- Links similar faces (same person)
-  landmarks TEXT,                         -- JSON: eye, nose, mouth coords (optional)
-  FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE
-);
+## Faces
 
-CREATE INDEX idx_faces_photo ON faces(photo_id);
-CREATE INDEX idx_faces_cluster ON faces(cluster_id);
-```
+`publicId`, event and photo references, bounding box, confidence, optional
+cluster ID and landmarks, and a finite L2-normalized 512-number embedding.
+Indexes support event/photo lookup. The vector index has 512 dimensions and
+requires `eventId` equality filtering, so a face from one event cannot match a
+different event.
 
-## Face Embeddings Table
-```sql
-CREATE TABLE face_embeddings (
-  id TEXT PRIMARY KEY,
-  face_id TEXT NOT NULL UNIQUE,
-  embedding BLOB NOT NULL,                -- 512 × 4 bytes = 2048 bytes
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (face_id) REFERENCES faces(id) ON DELETE CASCADE
-);
+## Match sessions
 
--- Vector search index (sqlite-vss)
-CREATE VIRTUAL TABLE vec_embeddings USING vss0(
-  embedding(512)  -- 512-dimensional float32 vectors
-);
+Event reference, matched count, threshold, duration, and timestamp. Raw user
+IP addresses and biometric vectors are not retained.
 
--- Insert trigger to keep vss table in sync
-CREATE TRIGGER face_embeddings_insert
-AFTER INSERT ON face_embeddings
-BEGIN
-  INSERT INTO vec_embeddings(rowid, embedding)
-  VALUES (NEW.rowid, NEW.embedding);
-END;
-```
+## Processing jobs
 
-## Match Sessions Table (Optional - for analytics)
-```sql
-CREATE TABLE match_sessions (
-  id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  user_ip TEXT,
-  matched_count INTEGER,
-  similarity_threshold REAL,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-);
-```
+External job ID, event and photo references, pending/accepted/processing/
+complete/failed/cancelled state, Modal job ID, attempts, sanitized error, and
+timestamps. Upload confirmation creates or reuses exactly one job for the
+event submission.
+
+## Access boundary
+
+Every public Convex function validates its arguments and Worker service
+secret. Organizer mutations additionally validate the signed-off organizer
+management token hash. Modal result persistence is available only through the
+authenticated Worker callback.

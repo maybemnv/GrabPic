@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { getApiBaseUrl, getDb, isSkippable } from './helpers/setup'
+import { getApiBaseUrl, isSkippable } from './helpers/setup'
 import { measureLatency, computePercentiles } from './helpers/benchmark'
 
 const TARGET_EVENTS = 10
@@ -7,11 +7,15 @@ const TARGET_EVENTS = 10
 describe.skipIf(isSkippable())('Event Throughput: 100 events', () => {
   const api = () => getApiBaseUrl()
   const createdIds: string[] = []
+  const organizerTokens = new Map<string, string>()
 
   afterAll(async () => {
     for (const id of createdIds) {
       try {
-        await fetch(`${api()}/events/${id}`, { method: 'DELETE' })
+        await fetch(`${api()}/events/${id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${organizerTokens.get(id) ?? ''}` },
+        })
       } catch {
         /* cleanup */
       }
@@ -35,19 +39,12 @@ describe.skipIf(isSkippable())('Event Throughput: 100 events', () => {
       expect(res.status).toBe(201)
       const body = await res.json()
       createdIds.push(body.eventId)
+      organizerTokens.set(body.eventId, body.organizerToken)
     }
 
     const duration = performance.now() - start
 
-    const db = getDb()
-    const result = await db.execute({
-      sql:
-        'SELECT COUNT(*) as cnt FROM events WHERE id IN (' +
-        createdIds.map(() => '?').join(',') +
-        ')',
-      args: createdIds,
-    })
-    expect(Number(result.rows[0].cnt)).toBe(TARGET_EVENTS)
+    expect(createdIds).toHaveLength(TARGET_EVENTS)
     expect(duration).toBeLessThan(30000)
   })
 

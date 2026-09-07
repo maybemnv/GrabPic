@@ -19,4 +19,16 @@ describe('event passcodes', () => {
     expect(result).toBe('123456')
     expect(attempts).toBe(2)
   })
+
+  it('retries a Convex passcode collision before succeeding', async () => {
+    let attempts = 0
+    const insertEvent = async () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('PASSCODE_CONFLICT')
+    }
+
+    await insertEventWithUniquePasscode(insertEvent, () => new Uint32Array([23456]))
+
+    expect(attempts).toBe(2)
+  })
 })

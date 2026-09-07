@@ -5,12 +5,16 @@ import { measureLatency, computePercentiles } from './helpers/benchmark'
 const P95_TARGET_MS = 500
 
 describe.skipIf(isSkippable())('API Latency: p95 <500ms', () => {
-  const eventId = `latency_${Date.now()}`
+  let eventId = ''
+  let organizerToken = ''
   const api = () => getApiBaseUrl()
 
   afterAll(async () => {
     try {
-      await fetch(`${api()}/events/${eventId}`, { method: 'DELETE' })
+      await fetch(`${api()}/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${organizerToken}` },
+      })
     } catch {
       /* cleanup */
     }
@@ -18,7 +22,7 @@ describe.skipIf(isSkippable())('API Latency: p95 <500ms', () => {
 
   it('event creation p95 latency', async () => {
     const durations = await measureLatency(async () => {
-      await fetch(`${api()}/events`, {
+      const response = await fetch(`${api()}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -28,6 +32,11 @@ describe.skipIf(isSkippable())('API Latency: p95 <500ms', () => {
           expiryDays: 1,
         }),
       })
+      if (!eventId) {
+        const body = await response.json()
+        eventId = body.eventId
+        organizerToken = body.organizerToken
+      }
     }, 10)
 
     const stats = computePercentiles(durations)
@@ -36,7 +45,9 @@ describe.skipIf(isSkippable())('API Latency: p95 <500ms', () => {
 
   it('event status query p95 latency', async () => {
     const durations = await measureLatency(async () => {
-      await fetch(`${api()}/events/${eventId}/status`)
+      await fetch(`${api()}/events/${eventId}/status`, {
+        headers: { Authorization: `Bearer ${organizerToken}` },
+      })
     }, 10)
 
     const stats = computePercentiles(durations)
