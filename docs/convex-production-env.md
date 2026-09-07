@@ -57,6 +57,47 @@ Modal must not receive `CONVEX_URL` or `CONVEX_SERVICE_SECRET`.
    `events/<event-id>/thumbs/200/<photo-id>.jpg` for 200px thumbnails, and
    `events/<event-id>/thumbs/800/<photo-id>.jpg` for 800px thumbnails.
 
+6. Configure R2 CORS for browser-direct signed PUTs. R2 CORS is separate from
+   Worker API CORS, so both policies must allow the exact frontend origin used
+   by the environment. Save this Wrangler-format policy as `r2-cors.json`:
+
+   ```json
+   {
+     "rules": [
+       {
+         "allowed": {
+           "origins": ["https://grabpic.app", "http://localhost:3000", "http://127.0.0.1:3000"],
+           "methods": ["PUT"],
+           "headers": ["Content-Type", "Content-Length"]
+         },
+         "exposeHeaders": ["ETag"],
+         "maxAgeSeconds": 3600
+       }
+     ]
+   }
+   ```
+
+   For staging, replace `https://grabpic.app` with the exact deployed staging
+   frontend origin before applying the policy. Do not copy production origins
+   into staging unless that is intentional. The Worker signs the declared
+   `Content-Type` and `Content-Length`, so the browser upload must preserve the
+   matching content type.
+
+   From `apps/api`, apply and verify the bucket policy:
+
+   ```powershell
+   pnpm exec wrangler r2 bucket cors set grabpic-photos --file r2-cors.json
+   pnpm exec wrangler r2 bucket cors list grabpic-photos
+   ```
+
+   Before sign-off, run the organizer upload flow from every configured
+   frontend origin. The browser Network panel must show a successful `OPTIONS`
+   preflight with `Access-Control-Allow-Origin` for that origin,
+   `Access-Control-Allow-Methods: PUT`, and `Content-Type` in
+   `Access-Control-Allow-Headers`, followed by a successful signed `PUT` and
+   upload confirmation. A direct `curl` request without an `Origin` header does
+   not verify browser CORS behavior.
+
 Do not expose the bucket URL to clients; gallery and upload URLs must remain
 Worker-generated signed URLs.
 
