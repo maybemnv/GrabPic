@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](../deployment.md).
+
 # GrabPic - Open Questions (Resolved)
 
 **Status:** All questions resolved. This file exists as record of decisions made during Week 1 planning.

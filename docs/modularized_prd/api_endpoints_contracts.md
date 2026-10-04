@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](../deployment.md).
+
 # GrabPic - API Endpoints & Contracts
 
 **Version:** 1.0

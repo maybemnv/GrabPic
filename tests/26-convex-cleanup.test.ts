@@ -36,20 +36,20 @@ describe('Convex external cleanup', () => {
     expect(client.mutation).toHaveBeenCalledOnce()
     expect(client.mutation.mock.calls[0][1]).toMatchObject({
       eventPublicId: 'evt_1234abcd',
-      sanitizedError: 'Modal cancellation failed',
+      sanitizedError: 'Processor cancellation failed',
     })
   })
 
-  it('defers purge while Modal dispatch is unresolved after failed compensation', async () => {
+  it('cancels a pending queued job before purging an event', async () => {
     const client = {
       query: vi.fn(async () => ({
         ...state(),
         modalJobId: undefined,
         modalDispatchUnresolved: true,
       })),
-      mutation: vi.fn(async () => ({ recorded: true })),
+      mutation: vi.fn(async () => ({ recorded: true, deletedRecords: 1, eventDeleted: true })),
     }
-    const bucket = { delete: vi.fn(), list: vi.fn() }
+    const bucket = { delete: vi.fn(), list: vi.fn(async () => ({ objects: [], truncated: false })) }
 
     const result = await cleanupEventResources({
       client,
@@ -59,15 +59,11 @@ describe('Convex external cleanup', () => {
       cancelModalJob: vi.fn(async () => undefined),
     })
 
-    expect(result).toMatchObject({ deleted: false, objectsDeleted: 0 })
-    expect(bucket.list).not.toHaveBeenCalled()
-    expect(bucket.delete).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ deleted: true })
+    expect(bucket.delete).toHaveBeenCalled()
     expect(client.mutation).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        eventPublicId: 'evt_1234abcd',
-        sanitizedError: 'Modal dispatch unresolved',
-      }),
+      expect.objectContaining({ eventPublicId: 'evt_1234abcd' }),
     )
   })
 

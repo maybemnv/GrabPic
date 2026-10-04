@@ -65,8 +65,11 @@ const app = new Hono<AppContext>()
 
 app.post('/results', async (c) => {
   if (
-    !c.env.MODAL_CALLBACK_TOKEN ||
-    !timingSafeEqual(c.req.header('authorization') ?? '', `Bearer ${c.env.MODAL_CALLBACK_TOKEN}`)
+    !c.env.PROCESSOR_CALLBACK_TOKEN ||
+    !timingSafeEqual(
+      c.req.header('authorization') ?? '',
+      `Bearer ${c.env.PROCESSOR_CALLBACK_TOKEN}`,
+    )
   ) {
     return c.json({ error: 'Callback authorization required', code: 'UNAUTHORIZED' }, 401)
   }
@@ -91,7 +94,7 @@ app.post('/results', async (c) => {
         eventPublicId: parsed.data.eventId,
         jobPublicId: parsed.data.jobId,
         attempt: parsed.data.attempt,
-        sanitizedError: 'Modal processing failed',
+        sanitizedError: 'Processor processing failed',
         now,
       })
       return c.json(result)
@@ -140,7 +143,7 @@ app.post('/results', async (c) => {
 
     // Callback failures may involve biometric payloads, so never attach the exception or body.
     c.get('logger').error('modal callback: persistence failed')
-    c.get('sentry').captureMessage('Modal callback persistence failed', {
+    c.get('sentry').captureMessage('Processor callback persistence failed', {
       route: 'modalCallback',
     })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)

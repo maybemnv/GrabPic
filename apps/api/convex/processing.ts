@@ -1,5 +1,5 @@
 import { v } from 'convex/values'
-import { mutation } from './_generated/server'
+import { mutation, query } from './_generated/server'
 import type { MutationCtx } from './_generated/server'
 import { eventByPublicId } from './lib/events'
 import { appError } from './lib/errors'
@@ -22,6 +22,45 @@ async function getJob(
   if (attempt !== undefined && job.attempts !== attempt) appError('STALE_JOB')
   return { event, job }
 }
+
+export const getDispatchState = query({
+  args: {
+    serviceSecret: v.string(),
+    eventPublicId: v.string(),
+    jobPublicId: v.string(),
+    attempt: v.number(),
+  },
+  returns: v.object({
+    state: v.union(v.literal('accepted'), v.literal('pending'), v.literal('gone')),
+    photos: v.array(v.object({ photo_id: v.string(), r2_key: v.string() })),
+  }),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    const event = await eventByPublicId(ctx, args.eventPublicId)
+    if (!event || event.status === 'deleting') return { state: 'gone' as const, photos: [] }
+    const job = await ctx.db
+      .query('processingJobs')
+      .withIndex('by_public_id', (q) => q.eq('publicId', args.jobPublicId))
+      .unique()
+    if (!job || job.eventId !== event._id || job.attempts !== args.attempt) {
+      return { state: 'gone' as const, photos: [] }
+    }
+    if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'complete') {
+      return { state: 'gone' as const, photos: [] }
+    }
+    if (job.status !== 'accepted' && job.status !== 'processing') {
+      return { state: 'pending' as const, photos: [] }
+    }
+    const photos = await Promise.all(job.photoIds.map((id) => ctx.db.get(id)))
+    if (photos.some((photo) => !photo || photo.eventId !== event._id)) {
+      return { state: 'gone' as const, photos: [] }
+    }
+    return {
+      state: 'accepted' as const,
+      photos: photos.map((photo) => ({ photo_id: photo!.publicId, r2_key: photo!.originalKey })),
+    }
+  },
+})
 
 export const markAccepted = mutation({
   args: {

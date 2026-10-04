@@ -7,35 +7,8 @@ from io import BytesIO
 from typing import Any, Dict, List, Tuple
 from urllib import request as urllib_request
 
-from fastapi import Request
-import modal
 import numpy as np
 from sklearn.cluster import DBSCAN
-
-app = modal.App("grabpic-processor")
-
-image = (
-    modal.Image.debian_slim()
-    .pip_install(
-        "boto3",
-        "facenet-pytorch",
-        "fastapi",
-        "numpy",
-        "pillow",
-        "scikit-learn",
-        "torch",
-        "torchvision",
-    )
-    .run_commands(
-        'python -c "from facenet_pytorch import MTCNN, InceptionResnetV1; MTCNN(); InceptionResnetV1(pretrained=\\"vggface2\\")"'
-    )
-)
-
-auth_secrets = [modal.Secret.from_name("grabpic-modal-auth")]
-processing_secrets = [
-    modal.Secret.from_name("grabpic-r2"),
-    modal.Secret.from_name("grabpic-modal-auth"),
-]
 
 
 def normalize_embedding(values: Any) -> np.ndarray:
@@ -96,13 +69,6 @@ def thumbnail_keys(event_id: str, photo_id: str) -> Tuple[str, str]:
     )
 
 
-def accepted_job_id(call: Any) -> str:
-    job_id = getattr(call, "object_id", None)
-    if not isinstance(job_id, str) or not job_id or len(job_id) > 200:
-        raise ValueError("Modal did not return a real job identifier")
-    return job_id
-
-
 def build_callback_payloads(
     job_id: str,
     event_id: str,
@@ -141,7 +107,7 @@ def build_callback_payloads(
 
 def send_callback(payload: Dict[str, Any]) -> None:
     callback_url = os.environ.get("WORKER_CALLBACK_URL")
-    callback_token = os.environ.get("MODAL_CALLBACK_TOKEN")
+    callback_token = os.environ.get("PROCESSOR_CALLBACK_TOKEN")
     if not callback_url or not callback_token:
         raise ValueError("Worker callback configuration is required")
     callback_request = urllib_request.Request(
@@ -155,7 +121,7 @@ def send_callback(payload: Dict[str, Any]) -> None:
     )
     with urllib_request.urlopen(callback_request, timeout=30) as response:
         if not 200 <= response.status < 300:
-            raise RuntimeError("Worker rejected Modal callback")
+            raise RuntimeError("Worker rejected processor callback")
 
 
 def object_store():
@@ -241,20 +207,11 @@ def image_bytes(image, size: int) -> bytes:
     return output.getvalue()
 
 
-def require_auth(request) -> None:
-    expected = os.environ.get("MODAL_TOKEN")
-    if not expected or not timing_safe_equal(
-        request.headers.get("authorization", ""), f"Bearer {expected}"
-    ):
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=401, detail="unauthorized")
+class ProcessingCancelled(Exception):
+    pass
 
 
-@app.function(
-    image=image, gpu="T4", timeout=600, memory=4096, secrets=processing_secrets
-)
-def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[str, Any]:
     job_id, event_id, attempt, photos = parse_processing_request(payload)
     store = object_store()
     detector, resnet, device = load_models()
@@ -264,6 +221,8 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         for photo in photos:
+            if cancelled():
+                raise ProcessingCancelled()
             source = store.get_object(
                 Bucket=os.environ["R2_BUCKET"], Key=photo["r2_key"]
             )["Body"].read()
@@ -323,6 +282,8 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
             len(set(clusters)) - (1 if -1 in clusters else 0) if all_faces else 0
         )
         processing_time = time.time() - start
+        if cancelled():
+            raise ProcessingCancelled()
         for callback in build_callback_payloads(
             job_id,
             event_id,
@@ -336,6 +297,8 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
             "clusters_found": cluster_count,
             "processing_time": processing_time,
         }
+    except ProcessingCancelled:
+        raise
     except Exception:
         send_callback(
             {
@@ -348,34 +311,7 @@ def process_event_job(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-@app.function(image=image, timeout=30, secrets=auth_secrets)
-@modal.fastapi_endpoint(method="POST")
-def process_event(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    require_auth(request)
-    parse_processing_request(payload)
-    call = process_event_job.spawn(payload)
-    return {"job_id": accepted_job_id(call)}
-
-
-@app.function(image=image, timeout=30, secrets=auth_secrets)
-@modal.fastapi_endpoint(method="POST")
-def cancel_processing(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    require_auth(request)
-    modal_job_id = payload.get("modal_job_id")
-    if not isinstance(modal_job_id, str) or not modal_job_id or len(modal_job_id) > 200:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=422, detail="modal_job_id is required")
-    modal.FunctionCall.from_id(modal_job_id).cancel()
-    return {"cancelled": True}
-
-
-@app.function(
-    image=image, gpu="T4", timeout=120, memory=4096, secrets=processing_secrets
-)
-@modal.fastapi_endpoint(method="POST")
-def embed_selfie(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    require_auth(request)
+def embed_selfie(payload: Dict[str, Any]) -> Dict[str, Any]:
     data_url = payload.get("selfie_data")
     if not isinstance(data_url, str):
         from fastapi import HTTPException

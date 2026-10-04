@@ -41,11 +41,11 @@ export async function requestProcessingAcceptance(
     body: JSON.stringify(request),
   })
 
-  if (!response.ok) throw new Error(`Modal processing request rejected with ${response.status}`)
+  if (!response.ok) throw new Error(`Processor request rejected with ${response.status}`)
 
   const body = (await response.json()) as { job_id?: unknown }
   if (typeof body.job_id !== 'string' || body.job_id.length === 0 || body.job_id.length > 200) {
-    throw new Error('Modal processing response is missing a job identifier')
+    throw new Error('Processor response is missing a job identifier')
   }
   return body.job_id
 }
@@ -53,7 +53,7 @@ export async function requestProcessingAcceptance(
 export async function requestProcessingCancellation(
   url: string,
   token: string,
-  modalJobId: string,
+  jobId: string,
   fetcher: Fetcher = fetch,
 ): Promise<void> {
   const response = await fetcher(url, {
@@ -62,11 +62,11 @@ export async function requestProcessingCancellation(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ modal_job_id: modalJobId }),
+    body: JSON.stringify({ job_id: jobId }),
   })
-  if (!response.ok) throw new Error(`Modal cancellation failed with ${response.status}`)
+  if (!response.ok) throw new Error(`Processor cancellation failed with ${response.status}`)
   const body = (await response.json()) as { cancelled?: unknown }
-  if (body.cancelled !== true) throw new Error('Modal did not acknowledge cancellation')
+  if (body.cancelled !== true) throw new Error('Processor did not acknowledge cancellation')
 }
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>

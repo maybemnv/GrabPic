@@ -3,7 +3,7 @@ import {
   buildProcessingRequest,
   requestProcessingCancellation,
   requestSelfieEmbedding,
-} from '../apps/api/src/lib/modal'
+} from '../apps/api/src/lib/processor'
 
 describe('Modal processing contract', () => {
   it('sends stable event-scoped R2 object references', () => {

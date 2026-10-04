@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](../deployment.md).
+
 # GrabPic Technical Architecture
 
 This document describes the current production path. The approved migration

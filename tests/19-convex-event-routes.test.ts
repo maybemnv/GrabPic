@@ -25,11 +25,11 @@ function testEnv(): Env {
     RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) } as unknown as RateLimit,
     LOG_LEVEL: 'error',
     SENTRY_DSN: '',
-    MODAL_TOKEN: '',
-    MODAL_CALLBACK_TOKEN: '',
-    MODAL_WEBHOOK_URL: '',
-    MODAL_CANCEL_URL: '',
-    MODAL_EMBEDDING_URL: '',
+    PROCESSOR_TOKEN: '',
+    PROCESSOR_CALLBACK_TOKEN: '',
+    PROCESSOR_WEBHOOK_URL: '',
+    PROCESSOR_CANCEL_URL: '',
+    PROCESSOR_EMBEDDING_URL: '',
     MATCH_THRESHOLD: '0.6',
     CONVEX_URL: 'https://convex.example.test',
     CONVEX_SERVICE_SECRET: 'worker-secret',
@@ -65,7 +65,7 @@ describe('Convex event routes', () => {
 
   it('does not apply browser CORS to the private Modal callback', async () => {
     const response = await app.fetch(
-      new Request('https://api.test/internal/modal/results', {
+      new Request('https://api.test/internal/processor/results', {
         method: 'OPTIONS',
         headers: {
           Origin: 'https://grabpic.app',

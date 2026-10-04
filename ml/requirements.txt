@@ -1,8 +1,9 @@
-boto3
-facenet-pytorch
-fastapi
-torch
-torchvision
-pillow
-scikit-learn
-numpy
+boto3==1.35.99
+facenet-pytorch==2.6.0
+fastapi==0.115.12
+uvicorn==0.34.2
+torch==2.2.2
+torchvision==0.17.2
+pillow==10.2.0
+scikit-learn==1.5.2
+numpy==1.26.4

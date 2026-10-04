@@ -77,17 +77,20 @@ export async function cleanupEventResources({
         now: Math.floor(Date.now() / 1000),
       })
     } catch {
-      await recordFailure(client, serviceSecret, eventId, 'Modal cancellation failed')
-      log?.error('event: Modal cancellation failed', { eventId })
-      sentry?.captureMessage('Event Modal cancellation failed', { eventId })
+      await recordFailure(client, serviceSecret, eventId, 'Processor cancellation failed')
+      log?.error('event: Processor cancellation failed', { eventId })
+      sentry?.captureMessage('Event Processor cancellation failed', { eventId })
       return failureResult(state, [], 0)
     }
   }
   if (state.modalDispatchUnresolved && !state.modalJobId) {
-    await recordFailure(client, serviceSecret, eventId, 'Modal dispatch unresolved')
-    log?.error('event: Modal dispatch unresolved', { eventId })
-    sentry?.captureMessage('Event Modal dispatch unresolved', { eventId })
-    return failureResult(state, [], 0)
+    // Queue consumers check the deleting state before dispatch. A pending job
+    // without a processor ID therefore cannot be running on OCI.
+    await client.mutation(api.deletion.markModalCancelled, {
+      serviceSecret,
+      eventPublicId: eventId,
+      now: Math.floor(Date.now() / 1000),
+    })
   }
 
   const eventPrefix = `events/${eventId}/`

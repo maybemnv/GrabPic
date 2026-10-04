@@ -15,7 +15,7 @@ vi.mock('../apps/api/src/lib/convex', () => ({
   createConvexClient: createConvexClientMock,
   hasConvexError: (error: unknown, code: string) => String(error).includes(code),
 }))
-vi.mock('../apps/api/src/lib/modal', () => ({
+vi.mock('../apps/api/src/lib/processor', () => ({
   buildProcessingRequest: vi.fn(),
   requestProcessingAcceptance: vi.fn(),
   requestSelfieEmbedding: requestSelfieEmbeddingMock,
@@ -34,11 +34,11 @@ function testEnv(): Env {
     RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) } as unknown as RateLimit,
     LOG_LEVEL: 'error',
     SENTRY_DSN: '',
-    MODAL_TOKEN: 'modal-token',
-    MODAL_CALLBACK_TOKEN: '',
-    MODAL_WEBHOOK_URL: '',
-    MODAL_CANCEL_URL: '',
-    MODAL_EMBEDDING_URL: 'https://modal.test/embed',
+    PROCESSOR_TOKEN: 'modal-token',
+    PROCESSOR_CALLBACK_TOKEN: '',
+    PROCESSOR_WEBHOOK_URL: '',
+    PROCESSOR_CANCEL_URL: '',
+    PROCESSOR_EMBEDDING_URL: 'https://modal.test/embed',
     MATCH_THRESHOLD: '0.6',
     CONVEX_URL: 'https://convex.example.test',
     CONVEX_SERVICE_SECRET: 'worker-secret',

@@ -22,11 +22,11 @@ function testEnv(): Env {
     RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) } as unknown as RateLimit,
     LOG_LEVEL: 'error',
     SENTRY_DSN: '',
-    MODAL_TOKEN: '',
-    MODAL_CALLBACK_TOKEN: 'callback-secret',
-    MODAL_WEBHOOK_URL: '',
-    MODAL_CANCEL_URL: '',
-    MODAL_EMBEDDING_URL: '',
+    PROCESSOR_TOKEN: '',
+    PROCESSOR_CALLBACK_TOKEN: 'callback-secret',
+    PROCESSOR_WEBHOOK_URL: '',
+    PROCESSOR_CANCEL_URL: '',
+    PROCESSOR_EMBEDDING_URL: '',
     MATCH_THRESHOLD: '0.6',
     CONVEX_URL: 'https://convex.example.test',
     CONVEX_SERVICE_SECRET: 'worker-secret',
@@ -61,7 +61,7 @@ function callbackBody(faceCount = 1) {
 }
 
 function callbackRequest(body: unknown, token = 'callback-secret'): Request {
-  return new Request('https://api.test/internal/modal/results', {
+  return new Request('https://api.test/internal/processor/results', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

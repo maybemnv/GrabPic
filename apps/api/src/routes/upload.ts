@@ -3,11 +3,6 @@ import { z } from 'zod'
 import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
 import { createConvexClient, hasConvexError } from '../lib/convex'
-import {
-  buildProcessingRequest,
-  requestProcessingAcceptance,
-  requestProcessingCancellation,
-} from '../lib/modal'
 import { hashOrganizerAuthorization } from '../lib/organizer-auth'
 import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
@@ -204,30 +199,23 @@ app.post('/confirm', async (c) => {
       return c.json({ status: 'processing', jobId: confirmation.jobId, estimatedTime: 120 }, 202)
     }
 
-    const processingRequest = buildProcessingRequest(
-      confirmation.jobId,
-      eventId,
-      confirmation.attempt,
-      uploads.map(({ photoId, key }) => ({ id: photoId, r2Key: key })),
-    )
-    let modalJobId: string
     try {
-      modalJobId = await requestProcessingAcceptance(
-        c.env.MODAL_WEBHOOK_URL,
-        c.env.MODAL_TOKEN,
-        processingRequest,
-      )
-    } catch (modalError) {
+      await c.env.PROCESSING_QUEUE.send({
+        job_id: confirmation.jobId,
+        event_id: eventId,
+        attempt: confirmation.attempt,
+      })
+    } catch (dispatchError) {
       await convex.mutation(api.processing.markDispatchFailed, {
         serviceSecret: c.env.CONVEX_SERVICE_SECRET,
         eventPublicId: eventId,
         jobPublicId: confirmation.jobId,
         attempt: confirmation.attempt,
-        sanitizedError: 'Modal did not accept the processing request',
+        sanitizedError: 'Processing queue did not accept the request',
         now: Math.floor(Date.now() / 1000),
       })
-      sentry.captureException(modalError, {
-        route: 'modalWebhook',
+      sentry.captureException(dispatchError, {
+        route: 'processingQueue',
         eventId,
         jobId: confirmation.jobId,
       })
@@ -243,28 +231,11 @@ app.post('/confirm', async (c) => {
         eventPublicId: eventId,
         jobPublicId: confirmation.jobId,
         attempt: confirmation.attempt,
-        modalJobId,
+        modalJobId: confirmation.jobId,
         now: Math.floor(Date.now() / 1000),
       })
     } catch (acceptError) {
-      try {
-        await requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId)
-        await convex.mutation(api.deletion.markModalCancelled, {
-          serviceSecret: c.env.CONVEX_SERVICE_SECRET,
-          eventPublicId: eventId,
-          now: Math.floor(Date.now() / 1000),
-        })
-      } catch {
-        log.error('upload: accepted Modal job compensation failed', {
-          eventId,
-          jobId: confirmation.jobId,
-        })
-        sentry.captureMessage('Accepted Modal job compensation failed', {
-          route: 'modalWebhook',
-          eventId,
-          jobId: confirmation.jobId,
-        })
-      }
+      // Queue delivery checks the Convex job state; a deleting event is never dispatched.
       throw acceptError
     }
 

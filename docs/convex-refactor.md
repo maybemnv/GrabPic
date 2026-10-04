@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](deployment.md).
+
 # GrabPic Turso-to-Convex Implementation Plan
 
 ## Summary

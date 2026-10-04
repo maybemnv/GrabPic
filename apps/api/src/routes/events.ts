@@ -10,7 +10,7 @@ import {
   hashOrganizerAuthorization,
   hashOrganizerToken,
 } from '../lib/organizer-auth'
-import { requestProcessingCancellation } from '../lib/modal'
+import { requestProcessingCancellation } from '../lib/processor'
 import { insertEventWithUniquePasscode } from '../lib/passcodes'
 import { rateLimitKey } from '../lib/rate-limit'
 
@@ -236,7 +236,11 @@ app.delete('/:eventId', async (c) => {
       bucket: c.env.PHOTOS,
       eventId,
       cancelModalJob: (modalJobId) =>
-        requestProcessingCancellation(c.env.MODAL_CANCEL_URL, c.env.MODAL_TOKEN, modalJobId),
+        requestProcessingCancellation(
+          c.env.PROCESSOR_CANCEL_URL,
+          c.env.PROCESSOR_TOKEN,
+          modalJobId,
+        ),
       log,
       sentry,
     })
