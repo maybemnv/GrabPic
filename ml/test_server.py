@@ -21,6 +21,11 @@ class ProcessorServerTests(unittest.TestCase):
                 "PROCESSOR_DB_PATH": f"{self.directory.name}/jobs.sqlite3",
                 "PROCESSOR_TOKEN": "test-secret",
                 "PROCESSOR_CALLBACK_TOKEN": "callback-secret",
+                "WORKER_CALLBACK_URL": "https://example.com/internal/processor/results",
+                "R2_BUCKET": "test-bucket",
+                "R2_ENDPOINT": "https://example.com",
+                "R2_ACCESS_KEY_ID": "test-key",
+                "R2_SECRET_ACCESS_KEY": "test-secret-key",
             },
         )
         self.environment.start()
@@ -135,6 +140,60 @@ class ProcessorServerTests(unittest.TestCase):
                 self.assertGreaterEqual(time.monotonic() - start, 0.04)
             finally:
                 worker.join()
+
+    def test_restart_finishes_cancellation_after_worker_is_gone(self):
+        from server import cancel, get_job, lifespan, process, _connect, app
+
+        payload = {
+            "job_id": "job_restart", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        with mock.patch("server.kick_worker"):
+            asyncio.run(process(_Request(payload)))
+            with _connect() as db:
+                db.execute("UPDATE jobs SET status = 'cancelling' WHERE job_id = 'job_restart'")
+
+            async def restart():
+                async with lifespan(app):
+                    pass
+
+            asyncio.run(restart())
+            self.assertEqual(get_job("job_restart")["status"], "cancelled")
+            self.assertEqual(asyncio.run(cancel(_Request({"job_id": "job_restart"}))), {"cancelled": True})
+
+    def test_callback_outage_requeues_durable_job_without_embeddings(self):
+        from processor import CallbackDeliveryFailed
+        from server import _drain, get_job, process, _wake_event
+
+        payload = {
+            "job_id": "job_callback", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        with mock.patch("server.kick_worker"):
+            asyncio.run(process(_Request(payload)))
+        _wake_event.clear()
+        with mock.patch("server.process_event_job", side_effect=CallbackDeliveryFailed()), mock.patch("server.threading.Timer") as timer:
+            _drain()
+        self.assertEqual(get_job("job_callback")["status"], "accepted")
+        timer.assert_called_once()
+
+    def test_new_job_wakes_worker_as_empty_drain_exits(self):
+        from server import _drain, _wake_event, process
+
+        payload = {
+            "job_id": "job_race", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        _wake_event.clear()
+        with mock.patch("server._worker_lock") as lock, mock.patch("server.kick_worker") as wake:
+            def enqueue_during_release():
+                asyncio.run(process(_Request(payload)))
+                _wake_event.set()
+
+            lock.acquire.return_value = True
+            lock.release.side_effect = enqueue_during_release
+            _drain()
+            self.assertEqual(wake.call_count, 2)
 
 
 class _Request:

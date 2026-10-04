@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 from processor import (
+    CallbackDeliveryFailed,
     ProcessingCancelled,
     embed_selfie,
     parse_processing_request,
@@ -19,6 +20,7 @@ from processor import (
 )
 
 _worker_lock = threading.Lock()
+_wake_event = threading.Event()
 
 
 @contextmanager
@@ -59,11 +61,14 @@ def _drain() -> None:
         return
     try:
         while True:
+            _wake_event.clear()
             with _connect() as db:
                 row = db.execute(
                     "SELECT job_id, payload FROM jobs WHERE status = 'accepted' ORDER BY rowid LIMIT 1"
                 ).fetchone()
                 if not row:
+                    if _wake_event.is_set():
+                        continue
                     return
                 job_id, payload = row
                 db.execute("UPDATE jobs SET status = 'running' WHERE job_id = ?", (job_id,))
@@ -71,6 +76,10 @@ def _drain() -> None:
                 process_event_job(json.loads(payload), cancelled=lambda: _cancelled(job_id))
             except ProcessingCancelled:
                 status = "cancelled"
+            except CallbackDeliveryFailed:
+                # The Queue has already acknowledged durable acceptance. Retry the
+                # same attempt until Convex acknowledges its callback.
+                status = "accepted"
             except Exception:
                 status = "failed"
             else:
@@ -80,20 +89,34 @@ def _drain() -> None:
                     "UPDATE jobs SET status = ? WHERE job_id = ?",
                     ("cancelled" if _cancelled(job_id) else status, job_id),
                 )
+            if status == "accepted":
+                retry = threading.Timer(30, kick_worker)
+                retry.daemon = True
+                retry.start()
+                return
     finally:
         _worker_lock.release()
+        # A producer can enqueue after the empty SELECT but before lock release.
+        if _wake_event.is_set():
+            kick_worker()
 
 
 def kick_worker() -> None:
+    _wake_event.set()
     threading.Thread(target=_drain, name="grabpic-processor", daemon=True).start()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not os.environ.get("PROCESSOR_TOKEN") or not os.environ.get("PROCESSOR_CALLBACK_TOKEN"):
-        raise RuntimeError("Processor authentication is required")
+    required = (
+        "PROCESSOR_TOKEN", "PROCESSOR_CALLBACK_TOKEN", "WORKER_CALLBACK_URL",
+        "R2_BUCKET", "R2_ENDPOINT", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    )
+    if any(not os.environ.get(name) for name in required):
+        raise RuntimeError("Processor configuration is incomplete")
     with _connect() as db:
         db.execute("UPDATE jobs SET status = 'accepted' WHERE status = 'running'")
+        db.execute("UPDATE jobs SET status = 'cancelled' WHERE status = 'cancelling'")
     kick_worker()
     yield
 
