@@ -119,9 +119,16 @@ def send_callback(payload: Dict[str, Any]) -> None:
         },
         method="POST",
     )
-    with urllib_request.urlopen(callback_request, timeout=30) as response:
-        if not 200 <= response.status < 300:
-            raise RuntimeError("Worker rejected processor callback")
+    try:
+        with urllib_request.urlopen(callback_request, timeout=30) as response:
+            if not 200 <= response.status < 300:
+                raise RuntimeError("Worker rejected processor callback")
+    except Exception as error:
+        raise CallbackDeliveryFailed("Processor callback was not acknowledged") from error
+
+
+class CallbackDeliveryFailed(Exception):
+    pass
 
 
 def object_store():
@@ -213,13 +220,13 @@ class ProcessingCancelled(Exception):
 
 def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[str, Any]:
     job_id, event_id, attempt, photos = parse_processing_request(payload)
-    store = object_store()
-    detector, resnet, device = load_models()
     start = time.time()
     all_faces: List[Dict[str, Any]] = []
     processed_photos: List[Dict[str, Any]] = []
 
     try:
+        store = object_store()
+        detector, resnet, device = load_models()
         for photo in photos:
             if cancelled():
                 raise ProcessingCancelled()
@@ -297,7 +304,7 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
             "clusters_found": cluster_count,
             "processing_time": processing_time,
         }
-    except ProcessingCancelled:
+    except (ProcessingCancelled, CallbackDeliveryFailed):
         raise
     except Exception:
         send_callback(
