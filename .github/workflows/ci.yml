@@ -5,9 +5,13 @@ on:
     branches: ['**']
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,11 +24,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+      - run: test -f apps/web/out/index.html
       - run: pnpm vitest run
+      - name: Validate Worker bindings without deploying
+        run: pnpm --filter @grabpic/api exec wrangler deploy --dry-run --env='' --outdir /tmp/grabpic-worker-dryrun
+      - name: Compile Cloudflare Pages Functions
+        run: pnpm --filter @grabpic/api exec wrangler pages functions build ../../functions --outdir /tmp/grabpic-pages-functions
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install numpy scikit-learn fastapi
-      - if: hashFiles('ml/test_processor.py') != ''
-        run: python ml/test_processor.py
-      - run: python -m py_compile ml/processor.py
+      - name: Install lightweight Python test dependencies
+        run: python -m pip install numpy==1.26.4 scikit-learn==1.5.2 fastapi==0.115.12
+      - name: Run processor contracts without inference
+        run: python -m unittest ml/test_processor.py ml/test_server.py
+      - run: python -m compileall -q ml
