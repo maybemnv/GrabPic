@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](../deployment.md).
+
 # Convex Data Model
 
 The schema is implemented in `apps/api/convex/schema.ts`. Public IDs are

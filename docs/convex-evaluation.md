@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](deployment.md).
+
 # Turso Baseline vs Convex
 
 This document records the evidence used to decide whether the Convex refactor

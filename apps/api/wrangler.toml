@@ -6,6 +6,17 @@ compatibility_date = "2025-01-01"
 binding = "PHOTOS"
 bucket_name = "grabpic-photos"
 
+[[queues.producers]]
+binding = "PROCESSING_QUEUE"
+queue = "grabpic-processing"
+
+[[queues.consumers]]
+queue = "grabpic-processing"
+max_batch_size = 1
+max_concurrency = 1
+max_retries = 20
+dead_letter_queue = "grabpic-processing-dead"
+
 [[ratelimits]]
 name = "RATE_LIMITER"
 namespace_id = "1001"
@@ -16,13 +27,8 @@ namespace_id = "1001"
 
 [vars]
 LOG_LEVEL = "info"
-MODAL_WEBHOOK_URL = ""
-MODAL_CANCEL_URL = ""
-MODAL_EMBEDDING_URL = ""
 MATCH_THRESHOLD = "0.6"
-CONVEX_URL = ""
 R2_BUCKET = "grabpic-photos"
-R2_ENDPOINT = ""
 
 [triggers]
 crons = ["0 3 * * *"]

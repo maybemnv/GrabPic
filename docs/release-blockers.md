@@ -1,3 +1,5 @@
+> Historical release-blocker record for the Modal phase. See [deployment.md](deployment.md) for the current OCI and Pages release gates.
+
 # Release Blockers — Tracking
 
 Branch: `fix-release-blocker`

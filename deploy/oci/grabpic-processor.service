@@ -1,0 +1,26 @@
+[Unit]
+Description=GrabPic CPU processor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=grabpic
+Group=grabpic
+WorkingDirectory=/opt/grabpic/ml
+EnvironmentFile=/etc/grabpic/processor.env
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=TORCH_HOME=/opt/grabpic/models
+ExecStart=/opt/grabpic/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=5
+MemoryMax=850M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/grabpic
+
+[Install]
+WantedBy=multi-user.target

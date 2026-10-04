@@ -4,36 +4,8 @@ import unittest
 from unittest import mock
 
 
-class _Decorator:
-    def __call__(self, function):
-        return function
-
-
-class _FakeImage:
-    @staticmethod
-    def debian_slim():
-        return _FakeImage()
-
-    def pip_install(self, *args):
-        return self
-
-    def run_commands(self, *args):
-        return self
-
-
-class _FakeModal:
-    App = lambda *args, **kwargs: types.SimpleNamespace(
-        function=lambda **kwargs: _Decorator()
-    )
-    Image = _FakeImage
-    Secret = types.SimpleNamespace(from_name=lambda *args, **kwargs: object())
-    fastapi_endpoint = lambda *args, **kwargs: _Decorator()
-
-
-sys.modules.setdefault("modal", _FakeModal())
 sys.path.insert(0, "ml")
 from processor import (
-    accepted_job_id,
     build_callback_payloads,
     embed_faces,
     load_models,
@@ -74,12 +46,6 @@ class ProcessorContractTests(unittest.TestCase):
         normalized = normalize_embedding([3.0, 4.0])
         self.assertAlmostEqual(float(normalized[0]), 0.6)
         self.assertAlmostEqual(float(normalized[1]), 0.8)
-
-    def test_modal_acceptance_requires_a_real_call_identifier(self):
-        call = types.SimpleNamespace(object_id="fc-123")
-        self.assertEqual(accepted_job_id(call), "fc-123")
-        with self.assertRaises(ValueError):
-            accepted_job_id(types.SimpleNamespace(object_id=""))
 
     def test_service_token_comparison_requires_exact_match(self):
         self.assertTrue(timing_safe_equal("Bearer token", "Bearer token"))

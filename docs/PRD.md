@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](deployment.md).
+
 # Archived GrabPic Product Requirements Document (PRD)
 
 > Historical planning snapshot. The Turso/SQL architecture described below is

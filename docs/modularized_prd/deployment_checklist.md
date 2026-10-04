@@ -1,3 +1,5 @@
+> Historical planning checklist. The current deploy order and staging gates are in [deployment.md](../deployment.md).
+
 # GrabPic - Deployment Checklist
 
 **Version:** 1.0

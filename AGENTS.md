@@ -63,7 +63,7 @@ grabpic/
 │   ├── types/        # Shared TypeScript types across apps
 │   └── config/       # Shared tsconfig, eslint configs
 ├── ml/
-│   ├── processor.py  # Modal.com GPU serverless functions
+│   ├── processor.py  # OCI CPU processor behind Nginx
 │   └── requirements.txt
 ├── pnpm-workspace.yaml
 └── AGENTS.md         # You are here
@@ -80,12 +80,12 @@ grabpic/
 - Workers run at the edge — keep handlers stateless and fast. No blocking I/O.
 - Use Hono's `c.env` for all environment bindings. Never `process.env` in Workers.
 
-### ML Processing: Modal.com (GPU Serverless)
+### ML Processing: OCI CPU service
 - Face detection: MTCNN or RetinaFace
 - Embedding generation: `facenet_pytorch.InceptionResnetV1(pretrained="vggface2")` (512-dim vectors)
 - Clustering: DBSCAN (eps: 0.3–0.5, test empirically per event)
-- **Never run ML inference synchronously in the API layer.** All processing is async — enqueue a job, return immediately, poll for status.
-- Modal functions are defined in `ml/processor.py`. Do not inline ML logic anywhere else.
+- **Never run ML inference synchronously in the Worker API layer.** All processing is async — enqueue a job, return immediately, poll for status.
+- CPU inference lives in `ml/processor.py`; `ml/server.py` provides durable FastAPI job acceptance and cancellation. Do not inline ML logic elsewhere.
 
 ### Storage: Cloudflare R2
 - Original photos → R2 (`events/<event-id>/<photo-id>.jpg`)
@@ -97,7 +97,7 @@ grabpic/
 
 ### Database: Convex
 - Schema and functions live in `apps/api/convex/`
-- The Worker calls Convex through `ConvexHttpClient`; the frontend and Modal do not connect directly.
+- The Worker calls Convex through `ConvexHttpClient`; the frontend and OCI processor do not connect directly.
 - Face embeddings are 512-dimensional normalized arrays in an event-filtered Convex vector index.
 
 ### Frontend: Next.js App Router
@@ -114,8 +114,8 @@ grabpic/
 Organizer uploads photos
   → API returns signed R2 URLs
   → Client uploads directly to R2 (bypasses Worker)
-  → Worker triggers Modal job (async)
-  → Modal: detect faces → generate FaceNet embeddings → DBSCAN cluster → authenticated Worker callback → Convex
+  → Worker enqueues a Cloudflare Queue event job (async)
+  → Queue consumer dispatches to OCI FastAPI → detect faces → FaceNet embeddings → DBSCAN cluster → authenticated Worker callback → Convex
   → Organizer dashboard polls /events/:id/status
 ```
 
@@ -123,7 +123,7 @@ Organizer uploads photos
 ```
 Attendee takes selfie
   → POST /events/:id/match with selfie image
-  → Worker: request a server-side FaceNet embedding from Modal (same model and weights as processing)
+  → Worker: request a server-side FaceNet embedding from the OCI processor (same model and weights as processing)
   → Convex event-filtered vector search against stored embeddings
   → Return top-N matching photo IDs
   → Client fetches signed R2 thumbnail URLs for matched photos
@@ -149,7 +149,7 @@ Attendee takes selfie
 - Don't run DBSCAN or any ML inference synchronously inside a Worker handler
 - Don't store face embeddings in R2 — they live in Convex for event-scoped vector search
 - Don't use Next.js API routes for anything — all backend logic is in Cloudflare Workers
-- Don't generate thumbnails client-side — always server-side via Modal after upload
+- Don't generate thumbnails client-side — always server-side on the OCI processor after upload
 - Don't expose event codes in URLs — codes are entered via form, never as query params
 - Don't add watermarks in Phase 1 — free tier is limited by photo count (100), not watermarks
 - Don't use `console.log` in production Workers — use structured logging with `c.env.LOG_LEVEL`
@@ -166,7 +166,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - **Embedding isolation:** Face embeddings are scoped to an event. Never share or cross-reference embeddings across events.
 - **No third-party embedding sharing:** Embeddings are never sent to any external analytics, logging, or data pipeline. Strip them from all logs.
 - **Public/organizer boundary:** Attendee lookup and invite endpoints return sanitized public context only. Full event details and management actions require the organizer management token.
-- **Right to deletion:** `DELETE /events/:id` must delete R2 objects, Convex rows, embeddings, and any queued Modal jobs for that event.
+- **Right to deletion:** `DELETE /events/:id` must delete R2 objects, Convex rows, embeddings, and queued or running processor jobs for that event.
 
 ---
 
@@ -190,7 +190,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 - InceptionResnetV1 with `vggface2` produces 512-dim face embeddings. The processor and selfie endpoint L2-normalize them; cosine similarity is then the dot product. Do not change model weights without re-processing the event.
 - Face detection confidence threshold: 0.9 minimum. Discard low-confidence detections rather than embedding them — they corrupt clusters.
 - If DBSCAN produces >500 clusters for an event, surface a warning to the organizer. It likely means bad lighting / very large event — not a bug.
-- Model weights are pinned in `ml/requirements.txt`. Never float to `latest`.
+- Model dependencies are pinned in `ml/requirements.txt` and `ml/uv.lock`; the CPU image preloads vggface2 weights. Never float to `latest`.
 
 ---
 
@@ -230,3 +230,7 @@ GrabPic processes biometric data. These rules are hardcoded into product decisio
 ---
 
 *Last updated: March 2026 — Manav*
+
+## Current deployment boundary
+
+`docs/deployment.md` is authoritative for the Cloudflare Pages + Worker/Queue + OCI CPU stack. The OCI VM has 1 GB RAM and one processor process; do not claim the selfie latency target or production readiness from local tests without measured staging inference. The current Convex `modalJobId` field is a retained internal field storing the processor job ID. Historical PRD and migration notes describe earlier Modal designs.

@@ -1,3 +1,5 @@
+> Historical implementation checklist. For the current Cloudflare Pages + Worker/Queue + OCI stack, use [deployment.md](deployment.md). Do not execute old Modal/Vercel tasks below.
+
 # GrabPic — Project Todo
 
 ## Monorepo Foundation

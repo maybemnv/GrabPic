@@ -1,3 +1,5 @@
+> Historical design snapshot: Modal references describe the earlier implementation. The current deployment contract is [deployment.md](../deployment.md).
+
 # Modal Processing Pipeline
 
 The implementation lives in `ml/processor.py`. Modal performs ML and R2

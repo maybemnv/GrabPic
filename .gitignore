@@ -16,6 +16,7 @@ node_modules
 # Build artifacts
 *.tsbuildinfo
 .next/
+out/
 dist/
 .wrangler/
 # Environment variables (user-provided secrets)

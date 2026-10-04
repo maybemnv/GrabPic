@@ -5,12 +5,16 @@ import { events } from './routes/events'
 import { match } from './routes/match'
 import { upload } from './routes/upload'
 import { qr } from './routes/qr'
-import { modalCallback } from './routes/modal-callback'
+import { modalCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
 import { createConvexClient } from './lib/convex'
-import { requestProcessingCancellation } from './lib/modal'
+import { requestProcessingCancellation } from './lib/processor'
+import { requestProcessingAcceptance } from './lib/processor'
+import type { ProcessingRequest } from './lib/processor'
+
+type ProcessingDispatch = Pick<ProcessingRequest, 'job_id' | 'event_id' | 'attempt'>
 
 export interface Env {
   PHOTOS: R2Bucket
@@ -21,11 +25,12 @@ export interface Env {
   RATE_LIMITER: RateLimit
   LOG_LEVEL: string
   SENTRY_DSN: string
-  MODAL_TOKEN: string
-  MODAL_CALLBACK_TOKEN: string
-  MODAL_WEBHOOK_URL: string
-  MODAL_CANCEL_URL: string
-  MODAL_EMBEDDING_URL: string
+  PROCESSOR_TOKEN: string
+  PROCESSOR_CALLBACK_TOKEN: string
+  PROCESSOR_WEBHOOK_URL: string
+  PROCESSOR_CANCEL_URL: string
+  PROCESSOR_EMBEDDING_URL: string
+  PROCESSING_QUEUE: Queue<ProcessingDispatch>
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
@@ -79,7 +84,7 @@ app.route('/events', events)
 app.route('/events/:eventId/match', match)
 app.route('/events/:eventId/upload', upload)
 app.route('/qr', qr)
-app.route('/internal/modal', modalCallback)
+app.route('/internal/processor', modalCallback)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
@@ -107,7 +112,11 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
           serviceSecret: env.CONVEX_SERVICE_SECRET,
           bucket: env.PHOTOS,
           cancelModalJob: (modalJobId) =>
-            requestProcessingCancellation(env.MODAL_CANCEL_URL, env.MODAL_TOKEN, modalJobId),
+            requestProcessingCancellation(
+              env.PROCESSOR_CANCEL_URL,
+              env.PROCESSOR_TOKEN,
+              modalJobId,
+            ),
           log,
           sentry,
         })
@@ -125,7 +134,40 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
   )
 }
 
+const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env) => {
+  const convex = createConvexClient(env)
+  for (const message of batch.messages) {
+    const request = message.body
+    try {
+      const state = await convex.query(api.processing.getDispatchState, {
+        serviceSecret: env.CONVEX_SERVICE_SECRET,
+        eventPublicId: request.event_id,
+        jobPublicId: request.job_id,
+        attempt: request.attempt,
+      })
+      if (state.state === 'gone') {
+        message.ack()
+        continue
+      }
+      if (state.state === 'pending') {
+        message.retry({ delaySeconds: 10 })
+        continue
+      }
+      const acceptedId = await requestProcessingAcceptance(
+        env.PROCESSOR_WEBHOOK_URL,
+        env.PROCESSOR_TOKEN,
+        { ...request, photos: state.photos },
+      )
+      if (acceptedId !== request.job_id) throw new Error('Processor returned a different job ID')
+      message.ack()
+    } catch {
+      message.retry({ delaySeconds: 30 })
+    }
+  }
+}
+
 export default {
   fetch: app.fetch,
   scheduled,
+  queue,
 }

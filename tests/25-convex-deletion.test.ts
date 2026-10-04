@@ -222,7 +222,7 @@ describe('Convex deletion state', () => {
         serviceSecret,
         eventPublicId: 'evt_1234abcd',
       }),
-    ).rejects.toMatchObject({ data: { code: 'MODAL_DISPATCH_UNRESOLVED' } })
+    ).rejects.toMatchObject({ data: { code: 'PROCESSOR_DISPATCH_UNRESOLVED' } })
     expect(await t.run(async (ctx) => await ctx.db.query('events').first())).not.toBeNull()
     expect(await t.run(async (ctx) => await ctx.db.query('processingJobs').first())).not.toBeNull()
 

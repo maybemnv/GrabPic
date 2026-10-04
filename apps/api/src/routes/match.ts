@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { api } from '../../convex/_generated/api'
 import type { AppContext } from '../index'
 import { createConvexClient, hasConvexError } from '../lib/convex'
-import { requestSelfieEmbedding } from '../lib/modal'
+import { requestSelfieEmbedding } from '../lib/processor'
 import { globalRateLimitKey } from '../lib/rate-limit'
 import { createSignedR2Url } from '../lib/r2'
 
@@ -64,15 +64,15 @@ app.post('/', async (c) => {
       now: Math.floor(Date.now() / 1000),
     })
 
-    if (!c.env.MODAL_EMBEDDING_URL || !c.env.MODAL_TOKEN) {
+    if (!c.env.PROCESSOR_EMBEDDING_URL || !c.env.PROCESSOR_TOKEN) {
       return c.json({ error: 'Matching service unavailable', code: 'MATCHING_UNAVAILABLE' }, 503)
     }
 
     let selfieEmbedding: Float32Array
     try {
       selfieEmbedding = await requestSelfieEmbedding(
-        c.env.MODAL_EMBEDDING_URL,
-        c.env.MODAL_TOKEN,
+        c.env.PROCESSOR_EMBEDDING_URL,
+        c.env.PROCESSOR_TOKEN,
         selfieData,
       )
     } catch (embeddingError) {

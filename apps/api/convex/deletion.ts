@@ -188,7 +188,7 @@ export const purgeBatch = mutation({
       activeJob &&
       ['pending', 'accepted', 'processing', 'cancelling'].includes(activeJob.status)
     ) {
-      appError('MODAL_DISPATCH_UNRESOLVED')
+      appError('PROCESSOR_DISPATCH_UNRESOLVED')
     }
 
     let deletedRecords = 0
