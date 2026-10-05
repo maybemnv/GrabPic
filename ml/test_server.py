@@ -102,16 +102,15 @@ class ProcessorServerTests(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 asyncio.run(process(_Request(payload)))
 
-    def test_selfie_endpoint_rejects_contention_without_loading_models(self):
+    def test_selfie_endpoint_works_while_a_batch_job_holds_the_worker(self):
         from server import embed, _worker_lock
 
         _worker_lock.acquire()
         try:
-            with mock.patch("server.embed_selfie") as model:
-                with self.assertRaises(HTTPException) as busy:
-                    asyncio.run(embed(_Request({"selfie_data": "ignored"})))
-                self.assertEqual(busy.exception.status_code, 503)
-                model.assert_not_called()
+            with mock.patch("server.embed_selfie", return_value={"embedding": [1.0]}) as model:
+                result = asyncio.run(embed(_Request({"selfie_data": "ignored"})))
+                self.assertEqual(result, {"embedding": [1.0]})
+                model.assert_called_once()
         finally:
             _worker_lock.release()
 
@@ -148,7 +147,7 @@ class ProcessorServerTests(unittest.TestCase):
             "job_id": "job_restart", "event_id": "evt_1", "attempt": 1,
             "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
         }
-        with mock.patch("server.kick_worker"):
+        with mock.patch("server.kick_worker"), mock.patch("server.load_models"):
             asyncio.run(process(_Request(payload)))
             with _connect() as db:
                 db.execute("UPDATE jobs SET status = 'cancelling' WHERE job_id = 'job_restart'")

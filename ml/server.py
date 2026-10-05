@@ -14,12 +14,14 @@ from processor import (
     CallbackDeliveryFailed,
     ProcessingCancelled,
     embed_selfie,
+    load_models,
     parse_processing_request,
     process_event_job,
     timing_safe_equal,
 )
 
 _worker_lock = threading.Lock()
+_embed_lock = threading.Lock()
 _wake_event = threading.Event()
 
 
@@ -106,6 +108,13 @@ def kick_worker() -> None:
     threading.Thread(target=_drain, name="grabpic-processor", daemon=True).start()
 
 
+def _preload_models() -> None:
+    try:
+        load_models()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     required = (
@@ -118,6 +127,9 @@ async def lifespan(_: FastAPI):
         db.execute("UPDATE jobs SET status = 'accepted' WHERE status = 'running'")
         db.execute("UPDATE jobs SET status = 'cancelled' WHERE status = 'cancelling'")
     kick_worker()
+    # Load FaceNet now so the first selfie does not pay the cold start. Best effort:
+    # a failure here resurfaces on the first real request.
+    threading.Thread(target=_preload_models, name="grabpic-preload", daemon=True).start()
     yield
 
 
@@ -206,15 +218,18 @@ async def cancel(request: Request) -> dict[str, bool]:
     return {"cancelled": True}
 
 
+def _embed_serialized(payload: dict[str, Any]) -> dict[str, Any]:
+    with _embed_lock:
+        return embed_selfie(payload)
+
+
 @app.post("/embed")
 async def embed(request: Request) -> dict[str, Any]:
     require_auth(request)
     payload = await request.json()
-    if not _worker_lock.acquire(blocking=False):
-        raise HTTPException(status_code=503, detail="processor busy")
-    try:
-        from starlette.concurrency import run_in_threadpool
+    from starlette.concurrency import run_in_threadpool
 
-        return await run_in_threadpool(embed_selfie, payload)
-    finally:
-        _worker_lock.release()
+    # ponytail: selfies queue behind each other but never behind a batch job, so
+    # matching keeps working while an event processes. Add a queue cap if the Worker
+    # rate limit stops bounding waiters.
+    return await run_in_threadpool(_embed_serialized, payload)

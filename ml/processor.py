@@ -2,6 +2,7 @@ import base64
 import hmac
 import json
 import os
+import threading
 import time
 from io import BytesIO
 from typing import Any, Dict, List, Tuple
@@ -9,6 +10,9 @@ from urllib import request as urllib_request
 
 import numpy as np
 from sklearn.cluster import DBSCAN
+
+
+SELFIE_MAX_SIDE = 1024
 
 
 def normalize_embedding(values: Any) -> np.ndarray:
@@ -144,21 +148,25 @@ def object_store():
 
 
 _models = None
+# Batch jobs and selfie requests share one model set; without the lock a startup
+# preload racing the first request would load the weights twice on a 1 GB VM.
+_models_lock = threading.Lock()
 
 
 def load_models():
     global _models
-    if _models is not None:
+    with _models_lock:
+        if _models is not None:
+            return _models
+
+        import torch
+        from facenet_pytorch import MTCNN, InceptionResnetV1
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        detector = MTCNN(keep_all=True, device=device, post_process=True)
+        resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+        _models = detector, resnet, device
         return _models
-
-    import torch
-    from facenet_pytorch import MTCNN, InceptionResnetV1
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    detector = MTCNN(keep_all=True, device=device, post_process=True)
-    resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
-    _models = detector, resnet, device
-    return _models
 
 
 def embed_faces(image, detector, resnet, device, one_face: bool = False):
@@ -199,9 +207,11 @@ def image_from_data_url(data_url: str):
 
     try:
         _, encoded = data_url.split(",", 1)
-        return Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert(
-            "RGB"
-        )
+        image = Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert("RGB")
+        # Phone selfies are 12 MP; MTCNN's pyramid on that is far too slow for the
+        # 1/8 OCPU VM, and the face is only resized to 160px for FaceNet anyway.
+        image.thumbnail((SELFIE_MAX_SIDE, SELFIE_MAX_SIDE))
+        return image
     except Exception as error:
         raise ValueError("invalid selfie image") from error
 

@@ -192,6 +192,22 @@ class ProcessorContractTests(unittest.TestCase):
         self.assertEqual(Detector.calls, 1)
         self.assertEqual(Resnet.calls, 1)
 
+    def test_selfie_is_downscaled_before_detection(self):
+        import base64
+        from io import BytesIO
+
+        from PIL import Image
+        from processor import SELFIE_MAX_SIDE, image_from_data_url
+
+        buffer = BytesIO()
+        Image.new("RGB", (4000, 3000)).save(buffer, format="JPEG")
+        data_url = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+        image = image_from_data_url(data_url)
+
+        self.assertEqual(max(image.size), SELFIE_MAX_SIDE)
+        self.assertEqual(image.size, (1024, 768))
+
     def test_processor_has_no_database_runtime_integration(self):
         with open("ml/processor.py", "r", encoding="utf-8") as source:
             processor = source.read().lower()

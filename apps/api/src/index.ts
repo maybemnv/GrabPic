@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { cors } from 'hono/cors'
 import { api } from '../convex/_generated/api'
 import { events } from './routes/events'
@@ -34,6 +34,7 @@ export interface Env {
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
+  CORS_ORIGINS?: string
 }
 
 export interface AppVariables {
@@ -48,11 +49,22 @@ export type AppContext = {
 
 const app = new Hono<AppContext>()
 
-const browserCors = cors({
-  origin: ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000'],
-  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-})
+const defaultOrigins = ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000']
+
+// CORS_ORIGINS (comma-separated, exact origins) lets a Pages *.pages.dev or preview
+// origin call the API without a code change.
+const browserCors: MiddlewareHandler<AppContext> = (c, next) => {
+  const extra = (c.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  const allowed = [...defaultOrigins, ...extra]
+  return cors({
+    origin: (origin) => (allowed.includes(origin) ? origin : null),
+    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+  })(c, next)
+}
 
 app.use('/events', browserCors)
 app.use('/events/*', browserCors)

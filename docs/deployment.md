@@ -57,8 +57,9 @@ local unit, contract, type, or frontend build checks.
    provision a valid certificate, expose 443, and keep port 8000 on loopback.
    Point the Worker processor URLs at this host's `/process`, `/cancel`,
    and `/embed`. Require the bearer token on each endpoint. Configure the
-   public `grabpic.app` and preview origins in Worker CORS and R2 CORS before
-   browser sign-off. Check `GET /health` and `GET Worker /health/processing`.
+   public `grabpic.app` and preview origins in R2 CORS, and list any extra
+   browser origins (for example the `*.pages.dev` address) in the Worker's
+   comma-separated `CORS_ORIGINS` variable, before browser sign-off. Check `GET /health` and `GET Worker /health/processing`.
 5. Deploy Worker with `pnpm --filter @grabpic/api deploy`. Configure Pages with
    repository root as build root, build command
    `pnpm install --frozen-lockfile && pnpm --filter @grabpic/web build`, and
