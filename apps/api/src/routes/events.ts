@@ -47,7 +47,7 @@ app.post('/', async (c) => {
       return c.json({ error: 'Too many event creation requests', code: 'RATE_LIMITED' }, 429)
     }
 
-    const body = await c.req.json()
+    const body = await c.req.json().catch(() => null)
     const parsed = createEventSchema.safeParse(body)
     if (!parsed.success) {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
@@ -109,7 +109,7 @@ app.post('/lookup', async (c) => {
     return c.json({ error: 'Too many event lookup requests', code: 'RATE_LIMITED' }, 429)
   }
 
-  const parsed = lookupEventSchema.safeParse(await c.req.json())
+  const parsed = lookupEventSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
   }

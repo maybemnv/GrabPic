@@ -46,7 +46,7 @@ app.post('/', async (c) => {
       return c.json({ error: 'Too many match requests', code: 'RATE_LIMITED' }, 429)
     }
 
-    const parsed = matchSchema.safeParse(await c.req.json())
+    const parsed = matchSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
     }

@@ -66,7 +66,7 @@ app.post('/', async (c) => {
       return c.json({ error: 'Event is no longer accepting uploads', code: 'UPLOADS_CLOSED' }, 409)
     }
 
-    const body = await c.req.json()
+    const body = await c.req.json().catch(() => null)
     const parsed = uploadSchema.safeParse(body)
     if (!parsed.success) {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
@@ -128,7 +128,7 @@ app.post('/confirm', async (c) => {
       return c.json({ error: 'Organizer authorization required', code: 'UNAUTHORIZED' }, 401)
     }
 
-    const parsed = confirmUploadSchema.safeParse(await c.req.json())
+    const parsed = confirmUploadSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) {
       return c.json({ error: parsed.error.message, code: 'VALIDATION_ERROR' }, 400)
     }
