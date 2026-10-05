@@ -24,6 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.grabpic.test
       - run: test -f apps/web/out/index.html
       - run: pnpm vitest run
       - name: Validate Worker bindings without deploying
