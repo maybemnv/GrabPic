@@ -73,12 +73,19 @@ class ProcessorContractTests(unittest.TestCase):
             for index in range(26)
         ]
 
-        payloads = build_callback_payloads("job_1", "evt_1", 2, photos, faces)
+        payloads = list(build_callback_payloads("job_1", "evt_1", 2, photos, faces))
 
         self.assertTrue(all(len(payload["faces"]) <= 25 for payload in payloads))
         self.assertTrue(payloads[-1]["final"])
         self.assertTrue(all(payload["attempt"] == 2 for payload in payloads))
         self.assertEqual(payloads[-1]["photos"], photos)
+
+    def test_final_callback_reports_skipped_photos_only_when_present(self):
+        photos = [{"photoId": "photo_1"}]
+        clean = list(build_callback_payloads("job_1", "evt_1", 1, photos, []))
+        self.assertNotIn("skippedPhotoIds", clean[-1])
+        skipped = list(build_callback_payloads("job_1", "evt_1", 1, photos, [], ["photo_2"]))
+        self.assertEqual(skipped[-1]["skippedPhotoIds"], ["photo_2"])
 
     def test_face_embedding_uses_one_detection_and_extracts_from_it(self):
         import numpy as np

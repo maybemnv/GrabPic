@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from io import BytesIO
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib import request as urllib_request
 
 import numpy as np
@@ -79,34 +79,35 @@ def build_callback_payloads(
     attempt: int,
     photos: List[Dict[str, Any]],
     faces: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    payloads: List[Dict[str, Any]] = []
+    skipped_photo_ids: Optional[List[str]] = None,
+) -> Iterator[Dict[str, Any]]:
+    # A generator so only one 25-face batch of Python-float embeddings exists at a
+    # time; the full set stays as float32 arrays in `faces`.
     for offset in range(0, len(faces), 25):
-        batch = faces[offset : offset + 25]
+        batch = [
+            {**face, "embedding": np.asarray(face["embedding"]).tolist()}
+            for face in faces[offset : offset + 25]
+        ]
         photo_ids = {face["photoId"] for face in batch}
-        payloads.append(
-            {
-                "status": "success",
-                "jobId": job_id,
-                "eventId": event_id,
-                "attempt": attempt,
-                "final": False,
-                "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
-                "faces": batch,
-            }
-        )
-    payloads.append(
-        {
+        yield {
             "status": "success",
             "jobId": job_id,
             "eventId": event_id,
             "attempt": attempt,
-            "final": True,
-            "photos": photos,
-            "faces": [],
+            "final": False,
+            "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
+            "faces": batch,
         }
-    )
-    return payloads
+    yield {
+        "status": "success",
+        "jobId": job_id,
+        "eventId": event_id,
+        "attempt": attempt,
+        "final": True,
+        "photos": photos,
+        "faces": [],
+        **({"skippedPhotoIds": skipped_photo_ids} if skipped_photo_ids else {}),
+    }
 
 
 def send_callback(payload: Dict[str, Any]) -> None:
@@ -233,6 +234,7 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
     start = time.time()
     all_faces: List[Dict[str, Any]] = []
     processed_photos: List[Dict[str, Any]] = []
+    skipped_photo_ids: List[str] = []
 
     try:
         store = object_store()
@@ -245,7 +247,13 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
             )["Body"].read()
             from PIL import Image
 
-            image = Image.open(BytesIO(source)).convert("RGB")
+            try:
+                image = Image.open(BytesIO(source)).convert("RGB")
+            except Exception:
+                # One undecodable original must not fail (and endlessly retry) a
+                # 1000-photo event. Storage and detection errors still fail the job.
+                skipped_photo_ids.append(photo["photo_id"])
+                continue
             width, height = image.size
             thumb_200, thumb_800 = thumbnail_keys(event_id, photo["photo_id"])
             store.put_object(
@@ -284,10 +292,12 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
                             "height": float(box[3] - box[1]),
                         },
                         "confidence": confidence,
-                        "embedding": normalize_embedding(embedding).tolist(),
+                        "embedding": normalize_embedding(embedding),
                     }
                 )
 
+        if not processed_photos:
+            raise ValueError("no photo could be decoded")
         clusters = (
             cluster_faces(np.array([face["embedding"] for face in all_faces]))
             if all_faces
@@ -307,6 +317,7 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
             attempt,
             processed_photos,
             all_faces,
+            skipped_photo_ids,
         ):
             send_callback(callback)
         return {
