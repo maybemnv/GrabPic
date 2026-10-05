@@ -1,4 +1,9 @@
-export function createSentryReporter(dsn: string | undefined) {
+// `waitUntil` keeps the report's fetch alive after a queue or scheduled handler
+// returns; without it the runtime may cancel the request and drop the alert.
+export function createSentryReporter(
+  dsn: string | undefined,
+  waitUntil?: (promise: Promise<unknown>) => void,
+) {
   if (!dsn) {
     return {
       captureException: (_err: unknown, _meta?: Record<string, unknown>) => {},
@@ -8,7 +13,13 @@ export function createSentryReporter(dsn: string | undefined) {
 
   const endpoint = dsn
 
-  async function send(body: Record<string, unknown>) {
+  function send(body: Record<string, unknown>) {
+    const pending = post(body)
+    waitUntil?.(pending)
+    return pending
+  }
+
+  async function post(body: Record<string, unknown>) {
     try {
       await fetch(endpoint, {
         method: 'POST',

@@ -75,7 +75,16 @@ app.use('/qr/*', browserCors)
 app.use('*', async (c, next) => {
   const start = Date.now()
   c.set('logger', createLogger(c.env.LOG_LEVEL))
-  c.set('sentry', createSentryReporter(c.env.SENTRY_DSN))
+  c.set(
+    'sentry',
+    createSentryReporter(c.env.SENTRY_DSN, (promise) => {
+      try {
+        c.executionCtx.waitUntil(promise)
+      } catch {
+        // No execution context (unit tests); the report stays best-effort.
+      }
+    }),
+  )
   await next()
   const ms = Date.now() - start
   const log = c.get('logger')
@@ -112,7 +121,7 @@ app.get('/health/processing', async (c) => {
 
 const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, ctx) => {
   const log = createLogger(env.LOG_LEVEL)
-  const sentry = createSentryReporter(env.SENTRY_DSN)
+  const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
 
   ctx.waitUntil(
     (async () => {
@@ -154,8 +163,9 @@ const failAbandonedJobs = async (
   batch: MessageBatch<ProcessingDispatch>,
   env: Env,
   convex: ReturnType<typeof createConvexClient>,
+  ctx: ExecutionContext,
 ) => {
-  const sentry = createSentryReporter(env.SENTRY_DSN)
+  const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
   for (const message of batch.messages) {
     const { event_id, job_id, attempt } = message.body
     try {
@@ -174,14 +184,15 @@ const failAbandonedJobs = async (
         (code) => hasConvexError(error, code),
       )
       if (settled) message.ack()
-      else message.retry({ delaySeconds: 60 })
+      // Back off up to an hour so a long Convex outage does not exhaust the retries.
+      else message.retry({ delaySeconds: Math.min(60 * (message.attempts ?? 1), 3600) })
     }
   }
 }
 
-const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env) => {
+const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env, ctx) => {
   const convex = createConvexClient(env)
-  if (batch.queue === DEAD_LETTER_QUEUE) return failAbandonedJobs(batch, env, convex)
+  if (batch.queue === DEAD_LETTER_QUEUE) return failAbandonedJobs(batch, env, convex, ctx)
   for (const message of batch.messages) {
     const request = message.body
     try {

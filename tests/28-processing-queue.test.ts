@@ -115,4 +115,31 @@ describe('processing queue consumer', () => {
     expect(ack).not.toHaveBeenCalled()
     expect(retry).toHaveBeenCalledWith({ delaySeconds: 60 })
   })
+
+  it('backs off dead-letter retries and caps the delay at an hour', async () => {
+    client.mutation.mockRejectedValue(new Error('network down'))
+    const { retry, batch, env } = setup('grabpic-processing-dead')
+    const message = batch.messages[0] as unknown as { attempts: number }
+    message.attempts = 5
+    await dispatch(batch, env)
+    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 300 })
+    message.attempts = 90
+    await dispatch(batch, env)
+    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 3600 })
+  })
+
+  it('keeps the dead-letter Sentry report alive with waitUntil', async () => {
+    client.mutation.mockResolvedValue({ recorded: true })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}')),
+    )
+    const { batch, env } = setup('grabpic-processing-dead')
+    const waitUntil = vi.fn()
+    await worker.queue!(batch, { ...env, SENTRY_DSN: 'https://sentry.test/ingest' }, {
+      waitUntil,
+    } as unknown as ExecutionContext)
+    expect(waitUntil).toHaveBeenCalledOnce()
+    expect(waitUntil.mock.calls[0]![0]).toBeInstanceOf(Promise)
+  })
 })
