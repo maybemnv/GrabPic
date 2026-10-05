@@ -17,6 +17,13 @@ max_concurrency = 1
 max_retries = 20
 dead_letter_queue = "grabpic-processing-dead"
 
+[[queues.consumers]]
+queue = "grabpic-processing-dead"
+max_batch_size = 10
+# Messages are dropped after max_retries and this queue has no DLQ of its own, so
+# allow the maximum with backoff (about four days, the default message retention).
+max_retries = 100
+
 [[ratelimits]]
 name = "RATE_LIMITER"
 namespace_id = "1001"

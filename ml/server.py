@@ -14,12 +14,16 @@ from processor import (
     CallbackDeliveryFailed,
     ProcessingCancelled,
     embed_selfie,
+    load_models,
     parse_processing_request,
     process_event_job,
     timing_safe_equal,
 )
 
 _worker_lock = threading.Lock()
+# A handful of selfies may wait for the shared inference lock (see processor.py);
+# beyond that a flood would pin every threadpool thread, so shed load instead.
+_embed_slots = threading.BoundedSemaphore(4)
 _wake_event = threading.Event()
 
 
@@ -106,6 +110,13 @@ def kick_worker() -> None:
     threading.Thread(target=_drain, name="grabpic-processor", daemon=True).start()
 
 
+def _preload_models() -> None:
+    try:
+        load_models()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     required = (
@@ -118,10 +129,23 @@ async def lifespan(_: FastAPI):
         db.execute("UPDATE jobs SET status = 'accepted' WHERE status = 'running'")
         db.execute("UPDATE jobs SET status = 'cancelled' WHERE status = 'cancelling'")
     kick_worker()
+    # Load FaceNet now so the first selfie does not pay the cold start. Best effort:
+    # a failure here resurfaces on the first real request.
+    threading.Thread(target=_preload_models, name="grabpic-preload", daemon=True).start()
     yield
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="invalid JSON body") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="JSON object required")
+    return payload
 
 
 def require_auth(request: Request) -> None:
@@ -142,7 +166,7 @@ def health() -> dict[str, str]:
 @app.post("/process", status_code=202)
 async def process(request: Request) -> dict[str, str]:
     require_auth(request)
-    payload = await request.json()
+    payload = await _json_body(request)
     try:
         job_id, event_id, attempt, _ = parse_processing_request(payload)
     except ValueError as error:
@@ -181,7 +205,7 @@ async def process(request: Request) -> dict[str, str]:
 @app.post("/cancel")
 async def cancel(request: Request) -> dict[str, bool]:
     require_auth(request)
-    payload = await request.json()
+    payload = await _json_body(request)
     job_id = payload.get("job_id")
     if not isinstance(job_id, str) or not job_id or len(job_id) > 200:
         raise HTTPException(status_code=422, detail="job_id is required")
@@ -209,12 +233,14 @@ async def cancel(request: Request) -> dict[str, bool]:
 @app.post("/embed")
 async def embed(request: Request) -> dict[str, Any]:
     require_auth(request)
-    payload = await request.json()
-    if not _worker_lock.acquire(blocking=False):
+    payload = await _json_body(request)
+    from starlette.concurrency import run_in_threadpool
+
+    if not _embed_slots.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="processor busy")
     try:
-        from starlette.concurrency import run_in_threadpool
-
+        # Selfies take the shared inference lock with priority over the batch worker,
+        # so matching waits for at most one photo instead of a whole event.
         return await run_in_threadpool(embed_selfie, payload)
     finally:
-        _worker_lock.release()
+        _embed_slots.release()

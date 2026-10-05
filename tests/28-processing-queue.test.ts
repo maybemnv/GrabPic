@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { client, createConvexClientMock } = vi.hoisted(() => ({
-  client: { query: vi.fn() },
+  client: { query: vi.fn(), mutation: vi.fn() },
   createConvexClientMock: vi.fn(),
 }))
 createConvexClientMock.mockImplementation(() => client)
-vi.mock('../apps/api/src/lib/convex', () => ({ createConvexClient: createConvexClientMock }))
+vi.mock('../apps/api/src/lib/convex', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../apps/api/src/lib/convex')>()),
+  createConvexClient: createConvexClientMock,
+}))
 
 import worker, { type Env } from '../apps/api/src/index'
 
@@ -15,10 +18,10 @@ const body = {
   attempt: 2,
 }
 const photos = [{ photo_id: 'photo_1', r2_key: 'events/evt_1/photo_1.jpg' }]
-function setup() {
+function setup(queue = 'grabpic-processing') {
   const ack = vi.fn()
   const retry = vi.fn()
-  const batch = { messages: [{ body, ack, retry }] } as unknown as MessageBatch<typeof body>
+  const batch = { queue, messages: [{ body, ack, retry }] } as unknown as MessageBatch<typeof body>
   const env = {
     CONVEX_URL: 'https://convex.test',
     CONVEX_SERVICE_SECRET: 'secret',
@@ -33,7 +36,10 @@ async function dispatch(batch: MessageBatch<typeof body>, env: Env) {
 }
 
 describe('processing queue consumer', () => {
-  beforeEach(() => client.query.mockReset())
+  beforeEach(() => {
+    client.query.mockReset()
+    client.mutation.mockReset()
+  })
   afterEach(() => vi.unstubAllGlobals())
 
   it('does not send deleted jobs to OCI', async () => {
@@ -82,5 +88,58 @@ describe('processing queue consumer', () => {
     await dispatch(batch, env)
     expect(ack).not.toHaveBeenCalled()
     expect(retry).toHaveBeenCalledWith({ delaySeconds: 30 })
+  })
+
+  it('marks a job failed once it lands in the dead-letter queue', async () => {
+    client.mutation.mockResolvedValue({ recorded: true })
+    const { ack, retry, batch, env } = setup('grabpic-processing-dead')
+    await dispatch(batch, env)
+    expect(client.mutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ eventPublicId: 'evt_1', jobPublicId: 'job_1', attempt: 2 }),
+    )
+    expect(client.query).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+    expect(retry).not.toHaveBeenCalled()
+  })
+
+  it('acknowledges dead-lettered jobs that are already gone and retries real failures', async () => {
+    client.mutation.mockRejectedValueOnce(new Error('STALE_JOB'))
+    let { ack, retry, batch, env } = setup('grabpic-processing-dead')
+    await dispatch(batch, env)
+    expect(ack).toHaveBeenCalledOnce()
+
+    client.mutation.mockRejectedValueOnce(new Error('network down'))
+    ;({ ack, retry, batch, env } = setup('grabpic-processing-dead'))
+    await dispatch(batch, env)
+    expect(ack).not.toHaveBeenCalled()
+    expect(retry).toHaveBeenCalledWith({ delaySeconds: 60 })
+  })
+
+  it('backs off dead-letter retries and caps the delay at an hour', async () => {
+    client.mutation.mockRejectedValue(new Error('network down'))
+    const { retry, batch, env } = setup('grabpic-processing-dead')
+    const message = batch.messages[0] as unknown as { attempts: number }
+    message.attempts = 5
+    await dispatch(batch, env)
+    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 300 })
+    message.attempts = 90
+    await dispatch(batch, env)
+    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 3600 })
+  })
+
+  it('keeps the dead-letter Sentry report alive with waitUntil', async () => {
+    client.mutation.mockResolvedValue({ recorded: true })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}')),
+    )
+    const { batch, env } = setup('grabpic-processing-dead')
+    const waitUntil = vi.fn()
+    await worker.queue!(batch, { ...env, SENTRY_DSN: 'https://sentry.test/ingest' }, {
+      waitUntil,
+    } as unknown as ExecutionContext)
+    expect(waitUntil).toHaveBeenCalledOnce()
+    expect(waitUntil.mock.calls[0]![0]).toBeInstanceOf(Promise)
   })
 })

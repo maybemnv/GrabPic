@@ -73,12 +73,19 @@ class ProcessorContractTests(unittest.TestCase):
             for index in range(26)
         ]
 
-        payloads = build_callback_payloads("job_1", "evt_1", 2, photos, faces)
+        payloads = list(build_callback_payloads("job_1", "evt_1", 2, photos, faces))
 
         self.assertTrue(all(len(payload["faces"]) <= 25 for payload in payloads))
         self.assertTrue(payloads[-1]["final"])
         self.assertTrue(all(payload["attempt"] == 2 for payload in payloads))
         self.assertEqual(payloads[-1]["photos"], photos)
+
+    def test_final_callback_reports_skipped_photos_only_when_present(self):
+        photos = [{"photoId": "photo_1"}]
+        clean = list(build_callback_payloads("job_1", "evt_1", 1, photos, []))
+        self.assertNotIn("skippedPhotoIds", clean[-1])
+        skipped = list(build_callback_payloads("job_1", "evt_1", 1, photos, [], ["photo_2"]))
+        self.assertEqual(skipped[-1]["skippedPhotoIds"], ["photo_2"])
 
     def test_face_embedding_uses_one_detection_and_extracts_from_it(self):
         import numpy as np
@@ -191,6 +198,68 @@ class ProcessorContractTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(Detector.calls, 1)
         self.assertEqual(Resnet.calls, 1)
+
+    def test_inference_never_overlaps_between_batch_and_selfie(self):
+        import threading
+        import time
+
+        import processor
+
+        active = 0
+        peak = 0
+
+        def work():
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            time.sleep(0.02)
+            active -= 1
+
+        threads = [
+            threading.Thread(target=run, args=(work,))
+            for run in (processor.run_batch_inference, processor.run_selfie_inference) * 3
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(peak, 1)
+
+    def test_batch_inference_yields_while_a_selfie_is_waiting(self):
+        import threading
+        import time
+
+        import processor
+
+        done = threading.Event()
+        processor._selfies_waiting = 1
+        try:
+            thread = threading.Thread(
+                target=lambda: (processor.run_batch_inference(lambda: None), done.set())
+            )
+            thread.start()
+            self.assertFalse(done.wait(0.2))
+        finally:
+            processor._selfies_waiting = 0
+        self.assertTrue(done.wait(2))
+        thread.join()
+
+    def test_selfie_is_downscaled_before_detection(self):
+        import base64
+        from io import BytesIO
+
+        from PIL import Image
+        from processor import SELFIE_MAX_SIDE, image_from_data_url
+
+        buffer = BytesIO()
+        Image.new("RGB", (4000, 3000)).save(buffer, format="JPEG")
+        data_url = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+        image = image_from_data_url(data_url)
+
+        self.assertEqual(max(image.size), SELFIE_MAX_SIDE)
+        self.assertEqual(image.size, (1024, 768))
 
     def test_processor_has_no_database_runtime_integration(self):
         with open("ml/processor.py", "r", encoding="utf-8") as source:

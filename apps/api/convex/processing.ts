@@ -158,6 +158,7 @@ export const persistResults = mutation({
     attempt: v.number(),
     final: v.boolean(),
     now: v.number(),
+    skippedPhotoIds: v.optional(v.array(v.string())),
     photos: v.array(
       v.object({
         publicId: v.string(),
@@ -245,7 +246,19 @@ export const persistResults = mutation({
     if (job.status === 'complete') {
       return { accepted: true as const, duplicate: true, completed: true }
     }
-    if (args.final && args.photos.length !== job.photoIds.length) appError('INCOMPLETE_JOB')
+    // Photos the processor could not decode are reported on the final batch so the
+    // event can still become ready; every job photo must be processed or skipped.
+    const skipped = args.skippedPhotoIds ?? []
+    if (skipped.length > 0 && !args.final) appError('INCOMPLETE_JOB')
+    for (const publicId of skipped) {
+      if (!photosByPublicId.has(publicId) || batchPhotoIds.has(publicId)) {
+        appError('PHOTO_NOT_IN_JOB')
+      }
+    }
+    if (new Set(skipped).size !== skipped.length) appError('INCOMPLETE_JOB')
+    if (args.final && args.photos.length + skipped.length !== job.photoIds.length) {
+      appError('INCOMPLETE_JOB')
+    }
 
     const newFacesByPhoto = new Map<string, number>()
     let insertedFaces = 0
@@ -287,6 +300,10 @@ export const persistResults = mutation({
         processingState: 'processed',
         faceCount: photo.faceCount + (newFacesByPhoto.get(photo.publicId) ?? 0),
       })
+    }
+
+    for (const publicId of skipped) {
+      await ctx.db.patch(photosByPublicId.get(publicId)!._id, { processingState: 'failed' })
     }
 
     await ctx.db.patch(event._id, {

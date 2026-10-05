@@ -2,13 +2,17 @@ import base64
 import hmac
 import json
 import os
+import threading
 import time
 from io import BytesIO
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib import request as urllib_request
 
 import numpy as np
 from sklearn.cluster import DBSCAN
+
+
+SELFIE_MAX_SIDE = 1024
 
 
 def normalize_embedding(values: Any) -> np.ndarray:
@@ -75,34 +79,35 @@ def build_callback_payloads(
     attempt: int,
     photos: List[Dict[str, Any]],
     faces: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    payloads: List[Dict[str, Any]] = []
+    skipped_photo_ids: Optional[List[str]] = None,
+) -> Iterator[Dict[str, Any]]:
+    # A generator so only one 25-face batch of Python-float embeddings exists at a
+    # time; the full set stays as float32 arrays in `faces`.
     for offset in range(0, len(faces), 25):
-        batch = faces[offset : offset + 25]
+        batch = [
+            {**face, "embedding": np.asarray(face["embedding"]).tolist()}
+            for face in faces[offset : offset + 25]
+        ]
         photo_ids = {face["photoId"] for face in batch}
-        payloads.append(
-            {
-                "status": "success",
-                "jobId": job_id,
-                "eventId": event_id,
-                "attempt": attempt,
-                "final": False,
-                "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
-                "faces": batch,
-            }
-        )
-    payloads.append(
-        {
+        yield {
             "status": "success",
             "jobId": job_id,
             "eventId": event_id,
             "attempt": attempt,
-            "final": True,
-            "photos": photos,
-            "faces": [],
+            "final": False,
+            "photos": [photo for photo in photos if photo["photoId"] in photo_ids],
+            "faces": batch,
         }
-    )
-    return payloads
+    yield {
+        "status": "success",
+        "jobId": job_id,
+        "eventId": event_id,
+        "attempt": attempt,
+        "final": True,
+        "photos": photos,
+        "faces": [],
+        **({"skippedPhotoIds": skipped_photo_ids} if skipped_photo_ids else {}),
+    }
 
 
 def send_callback(payload: Dict[str, Any]) -> None:
@@ -144,21 +149,53 @@ def object_store():
 
 
 _models = None
+# Batch jobs and selfie requests share one model set; without the lock a startup
+# preload racing the first request would load the weights twice on a 1 GB VM.
+_models_lock = threading.Lock()
+
+
+# One model forward pass at a time across batch jobs and selfies: the 1 GB VM cannot
+# hold two sets of MTCNN/FaceNet activations. The batch worker takes the lock per
+# photo, so a selfie waits for at most one photo; waiting selfies also hold the batch
+# back, since an unfair Lock would otherwise let the batch loop re-acquire forever.
+_inference_lock = threading.Lock()
+_selfies_waiting = 0
+_waiting_guard = threading.Lock()
+
+
+def run_batch_inference(work):
+    while _selfies_waiting:
+        time.sleep(0.05)
+    with _inference_lock:
+        return work()
+
+
+def run_selfie_inference(work):
+    global _selfies_waiting
+    with _waiting_guard:
+        _selfies_waiting += 1
+    try:
+        with _inference_lock:
+            return work()
+    finally:
+        with _waiting_guard:
+            _selfies_waiting -= 1
 
 
 def load_models():
     global _models
-    if _models is not None:
+    with _models_lock:
+        if _models is not None:
+            return _models
+
+        import torch
+        from facenet_pytorch import MTCNN, InceptionResnetV1
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        detector = MTCNN(keep_all=True, device=device, post_process=True)
+        resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+        _models = detector, resnet, device
         return _models
-
-    import torch
-    from facenet_pytorch import MTCNN, InceptionResnetV1
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    detector = MTCNN(keep_all=True, device=device, post_process=True)
-    resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
-    _models = detector, resnet, device
-    return _models
 
 
 def embed_faces(image, detector, resnet, device, one_face: bool = False):
@@ -199,9 +236,11 @@ def image_from_data_url(data_url: str):
 
     try:
         _, encoded = data_url.split(",", 1)
-        return Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert(
-            "RGB"
-        )
+        image = Image.open(BytesIO(base64.b64decode(encoded, validate=True))).convert("RGB")
+        # Phone selfies are 12 MP; MTCNN's pyramid on that is far too slow for the
+        # 1/8 OCPU VM, and the face is only resized to 160px for FaceNet anyway.
+        image.thumbnail((SELFIE_MAX_SIDE, SELFIE_MAX_SIDE))
+        return image
     except Exception as error:
         raise ValueError("invalid selfie image") from error
 
@@ -223,6 +262,7 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
     start = time.time()
     all_faces: List[Dict[str, Any]] = []
     processed_photos: List[Dict[str, Any]] = []
+    skipped_photo_ids: List[str] = []
 
     try:
         store = object_store()
@@ -235,7 +275,13 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
             )["Body"].read()
             from PIL import Image
 
-            image = Image.open(BytesIO(source)).convert("RGB")
+            try:
+                image = Image.open(BytesIO(source)).convert("RGB")
+            except Exception:
+                # One undecodable original must not fail (and endlessly retry) a
+                # 1000-photo event. Storage and detection errors still fail the job.
+                skipped_photo_ids.append(photo["photo_id"])
+                continue
             width, height = image.size
             thumb_200, thumb_800 = thumbnail_keys(event_id, photo["photo_id"])
             store.put_object(
@@ -260,9 +306,10 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
                 }
             )
 
-            for index, (box, confidence, embedding) in enumerate(
-                embed_faces(image, detector, resnet, device)
-            ):
+            detected = run_batch_inference(
+                lambda: embed_faces(image, detector, resnet, device)
+            )
+            for index, (box, confidence, embedding) in enumerate(detected):
                 all_faces.append(
                     {
                         "faceId": f"face_{photo['photo_id']}_{index}",
@@ -274,10 +321,12 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
                             "height": float(box[3] - box[1]),
                         },
                         "confidence": confidence,
-                        "embedding": normalize_embedding(embedding).tolist(),
+                        "embedding": normalize_embedding(embedding),
                     }
                 )
 
+        if not processed_photos:
+            raise ValueError("no photo could be decoded")
         clusters = (
             cluster_faces(np.array([face["embedding"] for face in all_faces]))
             if all_faces
@@ -297,6 +346,7 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
             attempt,
             processed_photos,
             all_faces,
+            skipped_photo_ids,
         ):
             send_callback(callback)
         return {
@@ -333,7 +383,9 @@ def embed_selfie(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=422, detail="invalid selfie image") from error
 
     detector, resnet, device = load_models()
-    faces = embed_faces(selfie_image, detector, resnet, device, one_face=True)
+    faces = run_selfie_inference(
+        lambda: embed_faces(selfie_image, detector, resnet, device, one_face=True)
+    )
     if not faces:
         from fastapi import HTTPException
 

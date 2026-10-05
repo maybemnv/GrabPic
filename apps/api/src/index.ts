@@ -1,17 +1,16 @@
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { cors } from 'hono/cors'
 import { api } from '../convex/_generated/api'
 import { events } from './routes/events'
 import { match } from './routes/match'
 import { upload } from './routes/upload'
 import { qr } from './routes/qr'
-import { modalCallback } from './routes/processor-callback'
+import { processorCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
-import { createConvexClient } from './lib/convex'
-import { requestProcessingCancellation } from './lib/processor'
-import { requestProcessingAcceptance } from './lib/processor'
+import { createConvexClient, hasConvexError } from './lib/convex'
+import { requestProcessingAcceptance, requestProcessingCancellation } from './lib/processor'
 import type { ProcessingRequest } from './lib/processor'
 
 type ProcessingDispatch = Pick<ProcessingRequest, 'job_id' | 'event_id' | 'attempt'>
@@ -34,6 +33,7 @@ export interface Env {
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
+  CORS_ORIGINS?: string
 }
 
 export interface AppVariables {
@@ -48,11 +48,22 @@ export type AppContext = {
 
 const app = new Hono<AppContext>()
 
-const browserCors = cors({
-  origin: ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000'],
-  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-})
+const defaultOrigins = ['https://grabpic.app', 'http://localhost:3000', 'http://127.0.0.1:3000']
+
+// CORS_ORIGINS (comma-separated, exact origins) lets a Pages *.pages.dev or preview
+// origin call the API without a code change.
+const browserCors: MiddlewareHandler<AppContext> = (c, next) => {
+  const extra = (c.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  const allowed = [...defaultOrigins, ...extra]
+  return cors({
+    origin: (origin) => (allowed.includes(origin) ? origin : null),
+    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+  })(c, next)
+}
 
 app.use('/events', browserCors)
 app.use('/events/*', browserCors)
@@ -64,7 +75,16 @@ app.use('/qr/*', browserCors)
 app.use('*', async (c, next) => {
   const start = Date.now()
   c.set('logger', createLogger(c.env.LOG_LEVEL))
-  c.set('sentry', createSentryReporter(c.env.SENTRY_DSN))
+  c.set(
+    'sentry',
+    createSentryReporter(c.env.SENTRY_DSN, (promise) => {
+      try {
+        c.executionCtx.waitUntil(promise)
+      } catch {
+        // No execution context (unit tests); the report stays best-effort.
+      }
+    }),
+  )
   await next()
   const ms = Date.now() - start
   const log = c.get('logger')
@@ -84,7 +104,7 @@ app.route('/events', events)
 app.route('/events/:eventId/match', match)
 app.route('/events/:eventId/upload', upload)
 app.route('/qr', qr)
-app.route('/internal/processor', modalCallback)
+app.route('/internal/processor', processorCallback)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
@@ -101,7 +121,7 @@ app.get('/health/processing', async (c) => {
 
 const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, ctx) => {
   const log = createLogger(env.LOG_LEVEL)
-  const sentry = createSentryReporter(env.SENTRY_DSN)
+  const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
 
   ctx.waitUntil(
     (async () => {
@@ -134,8 +154,45 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
   )
 }
 
-const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env) => {
+const DEAD_LETTER_QUEUE = 'grabpic-processing-dead'
+
+// A job that exhausted its delivery retries would otherwise sit in "processing"
+// forever. Marking it failed surfaces it to the organizer, who can retry through
+// the normal upload confirmation path.
+const failAbandonedJobs = async (
+  batch: MessageBatch<ProcessingDispatch>,
+  env: Env,
+  convex: ReturnType<typeof createConvexClient>,
+  ctx: ExecutionContext,
+) => {
+  const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
+  for (const message of batch.messages) {
+    const { event_id, job_id, attempt } = message.body
+    try {
+      await convex.mutation(api.processing.markProcessingFailed, {
+        serviceSecret: env.CONVEX_SERVICE_SECRET,
+        eventPublicId: event_id,
+        jobPublicId: job_id,
+        attempt,
+        sanitizedError: 'Processing could not be dispatched',
+        now: Math.floor(Date.now() / 1000),
+      })
+      sentry.captureMessage('Processing job abandoned after queue retries', { event_id, job_id })
+      message.ack()
+    } catch (error) {
+      const settled = ['EVENT_NOT_FOUND', 'EVENT_DELETING', 'JOB_NOT_FOUND', 'STALE_JOB'].some(
+        (code) => hasConvexError(error, code),
+      )
+      if (settled) message.ack()
+      // Back off up to an hour so a long Convex outage does not exhaust the retries.
+      else message.retry({ delaySeconds: Math.min(60 * (message.attempts ?? 1), 3600) })
+    }
+  }
+}
+
+const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env, ctx) => {
   const convex = createConvexClient(env)
+  if (batch.queue === DEAD_LETTER_QUEUE) return failAbandonedJobs(batch, env, convex, ctx)
   for (const message of batch.messages) {
     const request = message.body
     try {

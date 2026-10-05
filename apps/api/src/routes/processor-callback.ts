@@ -49,6 +49,7 @@ const successSchema = z.object({
   eventId: z.string().min(1).max(200),
   attempt: z.number().int().positive(),
   final: z.boolean(),
+  skippedPhotoIds: z.array(z.string().min(1).max(200)).max(1000).optional(),
   photos: z.array(photoSchema).max(1000),
   faces: z.array(faceSchema).max(25),
 })
@@ -107,6 +108,7 @@ app.post('/results', async (c) => {
       attempt: parsed.data.attempt,
       final: parsed.data.final,
       now,
+      ...(parsed.data.skippedPhotoIds ? { skippedPhotoIds: parsed.data.skippedPhotoIds } : {}),
       photos: parsed.data.photos.map((photo) => ({
         publicId: photo.photoId,
         thumbnail200Key: photo.thumbnail200Key,
@@ -144,10 +146,10 @@ app.post('/results', async (c) => {
     // Callback failures may involve biometric payloads, so never attach the exception or body.
     c.get('logger').error('modal callback: persistence failed')
     c.get('sentry').captureMessage('Processor callback persistence failed', {
-      route: 'modalCallback',
+      route: 'processorCallback',
     })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
-export { app as modalCallback }
+export { app as processorCallback }
