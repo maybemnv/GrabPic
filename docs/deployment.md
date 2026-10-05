@@ -32,9 +32,10 @@ local unit, contract, type, or frontend build checks.
    origin, and create bucket-scoped S3 credentials for the Worker signer and
    OCI processor. The OCI VM is outside Cloudflare's binding runtime and needs
    these credentials. Create `grabpic-processing` and
-   `grabpic-processing-dead` Queues and the Convex deployment. Monitor the dead
-   letter queue; after 20 failed deliveries an accepted job needs operator
-   investigation and an explicit retry.
+   `grabpic-processing-dead` Queues and the Convex deployment. After 20 failed
+   deliveries a message moves to the dead-letter queue, whose Worker consumer
+   marks the job failed (and reports it to Sentry) so the organizer can retry by
+   confirming the upload again.
 2. Deploy Convex schema/functions. Set the same random `CONVEX_SERVICE_SECRET`
    in Convex and the Worker. Provision R2 and the Queue bindings in
    `apps/api/wrangler.toml`. Set `R2_BUCKET` in Wrangler. Set `CONVEX_URL`,
@@ -88,6 +89,10 @@ The current Convex job completes only after a final callback covering all
 photos; splitting into per-photo messages would require a separate durable
 photo-completion barrier and would risk prematurely marking the event ready.
 The processor still reads one photo at a time on OCI.
+
+A photo whose original cannot be decoded is skipped rather than failing the
+event: the final callback lists it in `skippedPhotoIds` and Convex marks it
+`failed`. If no photo can be decoded the job fails.
 
 ## Local verification, without embeddings
 
