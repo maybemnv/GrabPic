@@ -114,6 +114,22 @@ class ProcessorServerTests(unittest.TestCase):
         finally:
             _worker_lock.release()
 
+    def test_selfie_endpoint_sheds_load_when_too_many_selfies_wait(self):
+        from server import embed, _embed_slots
+
+        held = 0
+        while _embed_slots.acquire(blocking=False):
+            held += 1
+        try:
+            with mock.patch("server.embed_selfie") as model:
+                with self.assertRaises(HTTPException) as busy:
+                    asyncio.run(embed(_Request({"selfie_data": "ignored"})))
+                self.assertEqual(busy.exception.status_code, 503)
+                model.assert_not_called()
+        finally:
+            for _ in range(held):
+                _embed_slots.release()
+
     def test_cancellation_waits_for_running_photo_to_stop(self):
         from server import process, cancel, _connect
 

@@ -22,6 +22,9 @@ from processor import (
 
 _worker_lock = threading.Lock()
 _embed_lock = threading.Lock()
+# A handful of selfies may wait for the model; beyond that a flood would pin every
+# threadpool thread (including /health) behind the lock, so shed load instead.
+_embed_slots = threading.BoundedSemaphore(4)
 _wake_event = threading.Event()
 
 
@@ -229,7 +232,11 @@ async def embed(request: Request) -> dict[str, Any]:
     payload = await request.json()
     from starlette.concurrency import run_in_threadpool
 
-    # ponytail: selfies queue behind each other but never behind a batch job, so
-    # matching keeps working while an event processes. Add a queue cap if the Worker
-    # rate limit stops bounding waiters.
-    return await run_in_threadpool(_embed_serialized, payload)
+    if not _embed_slots.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="processor busy")
+    try:
+        # Selfies queue behind each other but never behind a batch job, so matching
+        # keeps working while an event processes.
+        return await run_in_threadpool(_embed_serialized, payload)
+    finally:
+        _embed_slots.release()
