@@ -130,6 +130,19 @@ class ProcessorServerTests(unittest.TestCase):
             for _ in range(held):
                 _embed_slots.release()
 
+    def test_malformed_bodies_are_rejected_with_422_not_500(self):
+        from server import cancel, embed, process
+
+        class BadJson(_Request):
+            async def json(self):
+                raise ValueError("bad json")
+
+        for handler in (process, cancel, embed):
+            for request in (BadJson({}), _Request([1, 2])):
+                with self.assertRaises(HTTPException) as bad:
+                    asyncio.run(handler(request))
+                self.assertEqual(bad.exception.status_code, 422)
+
     def test_cancellation_waits_for_running_photo_to_stop(self):
         from server import process, cancel, _connect
 

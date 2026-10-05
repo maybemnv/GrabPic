@@ -139,6 +139,16 @@ async def lifespan(_: FastAPI):
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+async def _json_body(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="invalid JSON body") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="JSON object required")
+    return payload
+
+
 def require_auth(request: Request) -> None:
     token = os.environ.get("PROCESSOR_TOKEN")
     if not token or not timing_safe_equal(
@@ -157,7 +167,7 @@ def health() -> dict[str, str]:
 @app.post("/process", status_code=202)
 async def process(request: Request) -> dict[str, str]:
     require_auth(request)
-    payload = await request.json()
+    payload = await _json_body(request)
     try:
         job_id, event_id, attempt, _ = parse_processing_request(payload)
     except ValueError as error:
@@ -196,7 +206,7 @@ async def process(request: Request) -> dict[str, str]:
 @app.post("/cancel")
 async def cancel(request: Request) -> dict[str, bool]:
     require_auth(request)
-    payload = await request.json()
+    payload = await _json_body(request)
     job_id = payload.get("job_id")
     if not isinstance(job_id, str) or not job_id or len(job_id) > 200:
         raise HTTPException(status_code=422, detail="job_id is required")
@@ -229,7 +239,7 @@ def _embed_serialized(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/embed")
 async def embed(request: Request) -> dict[str, Any]:
     require_auth(request)
-    payload = await request.json()
+    payload = await _json_body(request)
     from starlette.concurrency import run_in_threadpool
 
     if not _embed_slots.acquire(blocking=False):
