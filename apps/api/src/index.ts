@@ -5,13 +5,12 @@ import { events } from './routes/events'
 import { match } from './routes/match'
 import { upload } from './routes/upload'
 import { qr } from './routes/qr'
-import { modalCallback } from './routes/processor-callback'
+import { processorCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
 import { createConvexClient, hasConvexError } from './lib/convex'
-import { requestProcessingCancellation } from './lib/processor'
-import { requestProcessingAcceptance } from './lib/processor'
+import { requestProcessingAcceptance, requestProcessingCancellation } from './lib/processor'
 import type { ProcessingRequest } from './lib/processor'
 
 type ProcessingDispatch = Pick<ProcessingRequest, 'job_id' | 'event_id' | 'attempt'>
@@ -96,7 +95,7 @@ app.route('/events', events)
 app.route('/events/:eventId/match', match)
 app.route('/events/:eventId/upload', upload)
 app.route('/qr', qr)
-app.route('/internal/processor', modalCallback)
+app.route('/internal/processor', processorCallback)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 

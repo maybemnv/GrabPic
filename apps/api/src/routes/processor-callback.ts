@@ -146,10 +146,10 @@ app.post('/results', async (c) => {
     // Callback failures may involve biometric payloads, so never attach the exception or body.
     c.get('logger').error('modal callback: persistence failed')
     c.get('sentry').captureMessage('Processor callback persistence failed', {
-      route: 'modalCallback',
+      route: 'processorCallback',
     })
     return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500)
   }
 })
 
-export { app as modalCallback }
+export { app as processorCallback }
