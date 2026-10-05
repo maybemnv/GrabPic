@@ -21,7 +21,6 @@ from processor import (
 )
 
 _worker_lock = threading.Lock()
-_embed_lock = threading.Lock()
 _wake_event = threading.Event()
 
 
@@ -218,18 +217,13 @@ async def cancel(request: Request) -> dict[str, bool]:
     return {"cancelled": True}
 
 
-def _embed_serialized(payload: dict[str, Any]) -> dict[str, Any]:
-    with _embed_lock:
-        return embed_selfie(payload)
-
-
 @app.post("/embed")
 async def embed(request: Request) -> dict[str, Any]:
     require_auth(request)
     payload = await request.json()
     from starlette.concurrency import run_in_threadpool
 
-    # ponytail: selfies queue behind each other but never behind a batch job, so
-    # matching keeps working while an event processes. Add a queue cap if the Worker
-    # rate limit stops bounding waiters.
-    return await run_in_threadpool(_embed_serialized, payload)
+    # Selfies take the shared inference lock with priority over the batch worker, so
+    # matching waits for at most one photo instead of a whole event.
+    # ponytail: unbounded waiters, capped only by the Worker rate limit.
+    return await run_in_threadpool(embed_selfie, payload)
