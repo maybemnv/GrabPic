@@ -154,6 +154,34 @@ _models = None
 _models_lock = threading.Lock()
 
 
+# One model forward pass at a time across batch jobs and selfies: the 1 GB VM cannot
+# hold two sets of MTCNN/FaceNet activations. The batch worker takes the lock per
+# photo, so a selfie waits for at most one photo; waiting selfies also hold the batch
+# back, since an unfair Lock would otherwise let the batch loop re-acquire forever.
+_inference_lock = threading.Lock()
+_selfies_waiting = 0
+_waiting_guard = threading.Lock()
+
+
+def run_batch_inference(work):
+    while _selfies_waiting:
+        time.sleep(0.05)
+    with _inference_lock:
+        return work()
+
+
+def run_selfie_inference(work):
+    global _selfies_waiting
+    with _waiting_guard:
+        _selfies_waiting += 1
+    try:
+        with _inference_lock:
+            return work()
+    finally:
+        with _waiting_guard:
+            _selfies_waiting -= 1
+
+
 def load_models():
     global _models
     with _models_lock:
@@ -278,9 +306,10 @@ def process_event_job(payload: Dict[str, Any], cancelled=lambda: False) -> Dict[
                 }
             )
 
-            for index, (box, confidence, embedding) in enumerate(
-                embed_faces(image, detector, resnet, device)
-            ):
+            detected = run_batch_inference(
+                lambda: embed_faces(image, detector, resnet, device)
+            )
+            for index, (box, confidence, embedding) in enumerate(detected):
                 all_faces.append(
                     {
                         "faceId": f"face_{photo['photo_id']}_{index}",
@@ -354,7 +383,9 @@ def embed_selfie(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=422, detail="invalid selfie image") from error
 
     detector, resnet, device = load_models()
-    faces = embed_faces(selfie_image, detector, resnet, device, one_face=True)
+    faces = run_selfie_inference(
+        lambda: embed_faces(selfie_image, detector, resnet, device, one_face=True)
+    )
     if not faces:
         from fastapi import HTTPException
 

@@ -199,6 +199,52 @@ class ProcessorContractTests(unittest.TestCase):
         self.assertEqual(Detector.calls, 1)
         self.assertEqual(Resnet.calls, 1)
 
+    def test_inference_never_overlaps_between_batch_and_selfie(self):
+        import threading
+        import time
+
+        import processor
+
+        active = 0
+        peak = 0
+
+        def work():
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            time.sleep(0.02)
+            active -= 1
+
+        threads = [
+            threading.Thread(target=run, args=(work,))
+            for run in (processor.run_batch_inference, processor.run_selfie_inference) * 3
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(peak, 1)
+
+    def test_batch_inference_yields_while_a_selfie_is_waiting(self):
+        import threading
+        import time
+
+        import processor
+
+        done = threading.Event()
+        processor._selfies_waiting = 1
+        try:
+            thread = threading.Thread(
+                target=lambda: (processor.run_batch_inference(lambda: None), done.set())
+            )
+            thread.start()
+            self.assertFalse(done.wait(0.2))
+        finally:
+            processor._selfies_waiting = 0
+        self.assertTrue(done.wait(2))
+        thread.join()
+
     def test_selfie_is_downscaled_before_detection(self):
         import base64
         from io import BytesIO

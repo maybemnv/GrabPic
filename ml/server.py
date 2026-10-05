@@ -21,9 +21,8 @@ from processor import (
 )
 
 _worker_lock = threading.Lock()
-_embed_lock = threading.Lock()
-# A handful of selfies may wait for the model; beyond that a flood would pin every
-# threadpool thread (including /health) behind the lock, so shed load instead.
+# A handful of selfies may wait for the shared inference lock (see processor.py);
+# beyond that a flood would pin every threadpool thread, so shed load instead.
 _embed_slots = threading.BoundedSemaphore(4)
 _wake_event = threading.Event()
 
@@ -231,11 +230,6 @@ async def cancel(request: Request) -> dict[str, bool]:
     return {"cancelled": True}
 
 
-def _embed_serialized(payload: dict[str, Any]) -> dict[str, Any]:
-    with _embed_lock:
-        return embed_selfie(payload)
-
-
 @app.post("/embed")
 async def embed(request: Request) -> dict[str, Any]:
     require_auth(request)
@@ -245,8 +239,8 @@ async def embed(request: Request) -> dict[str, Any]:
     if not _embed_slots.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="processor busy")
     try:
-        # Selfies queue behind each other but never behind a batch job, so matching
-        # keeps working while an event processes.
-        return await run_in_threadpool(_embed_serialized, payload)
+        # Selfies take the shared inference lock with priority over the batch worker,
+        # so matching waits for at most one photo instead of a whole event.
+        return await run_in_threadpool(embed_selfie, payload)
     finally:
         _embed_slots.release()
