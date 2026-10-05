@@ -17,6 +17,11 @@ max_concurrency = 1
 max_retries = 20
 dead_letter_queue = "grabpic-processing-dead"
 
+[[queues.consumers]]
+queue = "grabpic-processing-dead"
+max_batch_size = 10
+max_retries = 5
+
 [[ratelimits]]
 name = "RATE_LIMITER"
 namespace_id = "1001"

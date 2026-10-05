@@ -9,7 +9,7 @@ import { modalCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
 import { cleanupExpiredEvents } from './lib/event-cleanup'
-import { createConvexClient } from './lib/convex'
+import { createConvexClient, hasConvexError } from './lib/convex'
 import { requestProcessingCancellation } from './lib/processor'
 import { requestProcessingAcceptance } from './lib/processor'
 import type { ProcessingRequest } from './lib/processor'
@@ -146,8 +146,43 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
   )
 }
 
+const DEAD_LETTER_QUEUE = 'grabpic-processing-dead'
+
+// A job that exhausted its delivery retries would otherwise sit in "processing"
+// forever. Marking it failed surfaces it to the organizer, who can retry through
+// the normal upload confirmation path.
+const failAbandonedJobs = async (
+  batch: MessageBatch<ProcessingDispatch>,
+  env: Env,
+  convex: ReturnType<typeof createConvexClient>,
+) => {
+  const sentry = createSentryReporter(env.SENTRY_DSN)
+  for (const message of batch.messages) {
+    const { event_id, job_id, attempt } = message.body
+    try {
+      await convex.mutation(api.processing.markProcessingFailed, {
+        serviceSecret: env.CONVEX_SERVICE_SECRET,
+        eventPublicId: event_id,
+        jobPublicId: job_id,
+        attempt,
+        sanitizedError: 'Processing could not be dispatched',
+        now: Math.floor(Date.now() / 1000),
+      })
+      sentry.captureMessage('Processing job abandoned after queue retries', { event_id, job_id })
+      message.ack()
+    } catch (error) {
+      const settled = ['EVENT_NOT_FOUND', 'EVENT_DELETING', 'JOB_NOT_FOUND', 'STALE_JOB'].some(
+        (code) => hasConvexError(error, code),
+      )
+      if (settled) message.ack()
+      else message.retry({ delaySeconds: 60 })
+    }
+  }
+}
+
 const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env) => {
   const convex = createConvexClient(env)
+  if (batch.queue === DEAD_LETTER_QUEUE) return failAbandonedJobs(batch, env, convex)
   for (const message of batch.messages) {
     const request = message.body
     try {
