@@ -356,4 +356,4 @@ match -> signed gallery -> delete -> expiry cleanup. Test duplicate Queue
 messages, deletion before/after dispatch, stale attempts, bad callback auth,
 and retryable partial R2 deletion. Record peak RSS, swap use, p50/p95 matching
 and selfie-to-gallery latency in `docs/convex-evaluation.md`. Do not route
-production traffic until the 1 GB VM passes those measurements.
+production traffic until the selected OCI VM passes those measurements.

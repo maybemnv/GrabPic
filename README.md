@@ -31,7 +31,7 @@ python -m unittest ml/test_processor.py ml/test_server.py
 python -m compileall -q ml
 ```
 
-Local unit and contract tests do not run model inference. Deployed infrastructure tests opt in with `RUN_REAL_INFRA_TESTS=1`. See [deployment](docs/deployment.md) for environment ownership, deploy order, and staging sign-off.
+CI runs the build, type checks, deterministic contracts, and processor tests without model inference or deployed services. The six API, processing, throughput, and north-star suites skip unless `RUN_REAL_INFRA_TESTS=1` and `API_BASE_URL` are set. A green CI run therefore does not verify the deployed upload-to-gallery flow, face matching quality, or the five-second target. See [deployment](docs/deployment.md) for the real-stack staging gate and go-live requirements.
 
 ## Structure
 
