@@ -28,6 +28,25 @@ local unit, contract, type, or frontend build checks.
 
 ## Go-live runbook (everything you have to do by hand)
 
+### Current checkpoint: 2026-10-16 IST / 2026-10-15 UTC
+
+Convex production `rare-mole-267` is deployed. The Worker preview
+[`/health/processing`](https://staging-grabpic-api.manavkauahal99.workers.dev/health/processing)
+returns HTTP 200 `{"status":"ok","database":"connected"}`; this handler checks
+Convex authentication only. Private R2 `grabpic-photos` credential write/read/delete
+checks passed separately. See the [deployment snapshot](GRABPIC_AGENT_DEPLOYMENT.md#9-current-known-status-as-of-2026-10-16)
+for the exact Worker version, deployment ID, source SHA, and environment state.
+
+Both queues exist but delivery is paused; retention is 24 hours, not the
+four-day retry window assumed in the Worker config comment. No live cron or
+custom Worker domain is configured, and the primary `workers.dev` route is
+disabled. Pages project `grabpic` exists with no deployment. OCI setup is left
+to the user; processor URLs are still absent. Do not run the production deploy
+or trigger activation commands below as a continuation of the health check.
+Resume the remaining phases after their prerequisites are satisfied. The root
+`.env` still uses localhost for `NEXT_PUBLIC_API_URL`; it is not a ready-to-use
+production frontend configuration.
+
 Do the phases in order. Each phase ends with a check; do not start the next
 phase until it passes. Commands assume PowerShell or Git Bash from the repo root
 unless the step says to run it on the VM. Hostnames below are examples:
@@ -68,13 +87,14 @@ cd apps/api
 pnpm exec convex login
 pnpm convex:codegen
 pnpm convex:deploy            # choose or create the production deployment
-Get-Clipboard | pnpm exec convex env set --prod CONVEX_SERVICE_SECRET
-pnpm exec convex env list --prod
 ```
 
-Copy the secret from the password manager to the clipboard before the
-`Get-Clipboard` line. Note the production deployment URL; it becomes the
-Worker's `CONVEX_URL`.
+Set `CONVEX_SERVICE_SECRET` using the exact-file procedure in
+[convex-production-env.md, section 4](convex-production-env.md#4-deploy-convex).
+The earlier PowerShell clipboard pipeline introduced a trailing-newline mismatch
+in this session; file-based upload fixed authenticated health. Use the same
+existing secret in Convex and the Worker. Record the production deployment URL
+as the Worker's `CONVEX_URL`; the selected deployment is now `rare-mole-267`.
 
 Check: the Convex dashboard shows the schema and a vector index on face
 embeddings.
@@ -207,6 +227,10 @@ Settings > Domains & Routes), or use the `workers.dev` address for now.
 Check: `GET https://api.grabpic.app/health` is `ok`, `GET /health/processing`
 reports `database: connected`, and the dashboard shows the R2, Queue (producer
 plus both consumers), rate limit and cron bindings.
+
+`/health/processing` does not probe OCI, R2, queues, inference, or expiry. Those
+require the separate deployed smoke tests below. The working preview checkpoint
+above has no active queue delivery or cron.
 
 ### Phase 5: web app on Cloudflare Pages
 

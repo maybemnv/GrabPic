@@ -3,8 +3,9 @@
 Last updated: 2026-10-16
 
 **Status:** Phase 1 implementation and production-readiness fixes are merged.
-Deployment and measured staging acceptance remain open; production readiness
-has not been established.
+Convex and the Worker preview are deployed with verified database health; R2
+credential checks passed. OCI, Pages deployment, production activation, and
+measured staging acceptance remain open; production readiness is not established.
 
 - [ ] Validate market first
 - [ ] Talk to organizers
@@ -53,14 +54,35 @@ CI uses processor contracts without model inference. Infrastructure suites skip
 unless `RUN_REAL_INFRA_TESTS=1` and `API_BASE_URL` are set. Green CI does not
 establish the five-second target or deployment readiness.
 
-**Infrastructure (deployment not verified)**
+**Infrastructure (verified 2026-10-16 IST / 2026-10-15 UTC)**
 
 - [x] Convex schema and functions
-- [ ] Convex production functions and service-secret configuration verified
-- [ ] Cloudflare R2 bucket
-- [ ] API Worker, processing queue, and `grabpic-processing-dead` queue deployed
+- [x] Convex production `rare-mole-267` deployed; event-filtered 512-d vector index and authenticated health verified
+- [x] Private Cloudflare R2 `grabpic-photos` bucket, replacement credentials, write/read/delete round trip, and configured PUT CORS
+- [x] API Worker preview deployed with Convex/R2 credentials and processor tokens
+- [x] Processing and dead-letter queues created with consumers; both deliveries paused, retention 24 hours
+- [x] Preview `/health` and `/health/processing` return HTTP 200; database reports connected
+- [ ] Configure OCI processor URLs; intentionally left empty pending user setup
+- [ ] Enable production Worker routing, queue delivery, and expiry cron after prerequisites and staging gates
 - [ ] OCI processor deployed and measured
 - [ ] Cloudflare Pages frontend deployed
+
+Verified health: [Worker preview processing health](https://staging-grabpic-api.manavkauahal99.workers.dev/health/processing)
+returned `{"status":"ok","database":"connected"}`. This checks Worker-to-Convex
+authentication only. Worker version `a4c0d732-b7cd-4d00-b04e-63534cb8a2ae`
+uses source commit `5895969a7b27e9622a4fe433095afaaee5add0e6`; see the
+[deployment handoff](GRABPIC_AGENT_DEPLOYMENT.md#9-current-known-status-as-of-2026-10-16)
+for deployment ID, environment state, and remaining blockers. The primary
+`workers.dev` route is disabled, no custom domain is attached, and no live cron
+is scheduled. The Pages project exists but has no deployment. Queue retention
+does not yet match the four-day retry-window assumption in the repository.
+
+The ignored root `.env` has the selected Convex/R2 settings and processor tokens;
+frontend API configuration remains localhost and processor URLs remain empty.
+Wrangler's missing Undici files were repaired with a frozen-lockfile reinstall;
+secret-command startup, Worker dry-run, frontend static build, and Pages Functions
+compilation passed in this session. No dependency or application source changes
+were needed for that repair or the preview deployment.
 
 **Staging and go-live gates**
 

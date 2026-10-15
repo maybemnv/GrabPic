@@ -13,6 +13,24 @@ Next.js -> Cloudflare Worker/Hono -> Convex
                          +-> Queue -> OCI processor -> authenticated Worker callback -> Convex
 ```
 
+## Verified checkpoint: 2026-10-16 IST / 2026-10-15 UTC
+
+The selected Convex deployment is **production `rare-mole-267`** at
+`https://rare-mole-267.convex.cloud`. Schema/functions and the event-filtered
+512-dimensional vector index are deployed. Direct authenticated health and the
+[Worker preview health endpoint](https://staging-grabpic-api.manavkauahal99.workers.dev/health/processing)
+both pass; the latter returns HTTP 200 `{"status":"ok","database":"connected"}`.
+R2 `grabpic-photos` credential write/read/delete checks passed separately.
+
+This is a partial deployment. Both queues are paused with 24-hour retention;
+cron and the primary Worker route are disabled. There is no attached custom
+Worker domain or Pages deployment. The three processor URLs remain empty in
+the ignored root `.env` and absent from the Worker, pending user-owned OCI setup.
+The root frontend API URL is still localhost. See the
+[deployment snapshot](GRABPIC_AGENT_DEPLOYMENT.md#9-current-known-status-as-of-2026-10-16)
+for deployment IDs and remaining steps. A connected database health response
+does not establish processor readiness or authorize production cutover.
+
 ## 1. Preconditions
 
 - Start from the reviewed reviewed deployment commit and record its
@@ -28,7 +46,7 @@ Next.js -> Cloudflare Worker/Hono -> Convex
 
 | Value | Set in | Purpose |
 | --- | --- | --- |
-| `CONVEX_URL` | Worker vars | Production Convex deployment URL |
+| `CONVEX_URL` | Worker binding (currently a secret binding) | Production Convex deployment URL |
 | `CONVEX_SERVICE_SECRET` | Convex env and Worker secret | Worker-only Convex authentication; use the same random value in both places |
 | `R2_BUCKET`, `R2_ENDPOINT` | Worker vars and OCI processor environment | R2 bucket and S3-compatible endpoint |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Worker secret and OCI processor environment | Scoped R2 S3 credentials for signing and OCI processing |
@@ -113,17 +131,30 @@ pnpm convex:deploy
 Authenticate the CLI with the production deployment (or provide the CI
 `CONVEX_DEPLOY_KEY`). Capture the resulting production `CONVEX_URL`.
 
-Set the Worker-only secret on the production Convex deployment without putting
-it in shell history:
+The earlier PowerShell clipboard pipeline introduced a trailing-newline mismatch
+in this session. Uploading an exact UTF-8 file without a trailing newline fixed
+authenticated health. Copy the existing shared secret from your secret store,
+then use a temporary file so its value stays out of shell history:
 
 ```powershell
-Get-Clipboard | pnpm exec convex env set --prod CONVEX_SERVICE_SECRET
-pnpm exec convex env list --prod
+$secretFile = Join-Path $env:TEMP ('grabpic-convex-' + [guid]::NewGuid() + '.txt')
+try {
+  $secretValue = (Get-Clipboard -Raw).TrimEnd([char[]]"`r`n")
+  if ([string]::IsNullOrWhiteSpace($secretValue)) { throw 'Secret clipboard is empty' }
+  [System.IO.File]::WriteAllText($secretFile, $secretValue, [System.Text.UTF8Encoding]::new($false))
+  pnpm exec convex env set CONVEX_SERVICE_SECRET --from-file $secretFile --prod
+  if ($LASTEXITCODE -ne 0) { throw 'Convex secret upload failed' }
+} finally {
+  Remove-Item -LiteralPath $secretFile -ErrorAction SilentlyContinue
+  Remove-Variable secretValue -ErrorAction SilentlyContinue
+}
 ```
 
-The value piped from the clipboard must be a newly generated random secret.
-Confirm the deployed schema includes the event-filtered 512-dimensional face
-vector index before continuing.
+For a new environment, generate a random secret first; for this deployment use
+the value already shared with the Worker, rather than rotating it during a
+resume. Do not print `convex env list` output into deployment records. Verify
+authenticated health and the event-filtered 512-dimensional vector index before
+continuing. Changing only one side of the shared secret breaks authentication.
 
 ## 5. Configure and deploy the OCI processor
 
@@ -154,7 +185,7 @@ MATCH_THRESHOLD=0.6
 LOG_LEVEL=info
 ```
 
-Set these as Worker secrets: `CONVEX_SERVICE_SECRET`,
+Set these as Worker secrets: `CONVEX_URL`, `CONVEX_SERVICE_SECRET`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PROCESSOR_TOKEN`,
 `PROCESSOR_CALLBACK_TOKEN`, and `SENTRY_DSN` if used.
 
@@ -172,7 +203,9 @@ GET https://<worker-host>/health
 GET https://<worker-host>/health/processing
 ```
 
-The processing health endpoint must report `database: connected`.
+The processing health endpoint must report `database: connected`. Its current
+implementation calls Convex `system.health` only; it does not check OCI, R2,
+Queue delivery, or inference. Complete the separate staging sign-off below.
 
 ## 7. Configure Next.js
 

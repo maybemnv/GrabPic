@@ -17,6 +17,12 @@ flowchart LR
 
 Cloudflare Pages serves a static Next.js export and an invite redirect Function. The Worker remains the only public application API. The processor runs FastAPI behind Nginx on OCI and never receives Convex credentials. The selfie and batch paths use the same pinned FaceNet weights. An E2.1.Micro VM is unproven for the under-five-second matching target, so a measured staging gate is mandatory.
 
+Deployment progress (2026-10-16 IST): Convex and Worker preview database health
+are verified; R2 credential checks passed. OCI setup, Pages deployment, queue/cron
+activation, and measured staging acceptance remain open. See the
+[verified deployment snapshot](docs/GRABPIC_AGENT_DEPLOYMENT.md#9-current-known-status-as-of-2026-10-16)
+and [progress checklist](docs/progress.md) before resuming deployment.
+
 ## Local development and verification
 
 ```bash

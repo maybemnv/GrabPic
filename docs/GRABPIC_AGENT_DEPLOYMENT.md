@@ -4,7 +4,7 @@ project: maybemnv/GrabPic
 repository: https://github.com/maybemnv/GrabPic
 document_type: agent-context-and-deployment-contract
 last_reviewed: 2026-10-16
-status: pre-production; real-stack staging unverified
+status: pre-production; Worker preview and Convex health verified; OCI and real-stack staging pending
 ---
 
 # GrabPic: Architecture, Infrastructure, and Deployment Contract
@@ -219,23 +219,24 @@ Follow `docs/deployment.md` for actual commands and service-specific setup. Use 
 
 - [ ] Verify which Cloudflare account/project, Convex deployment, OCI instance, DNS names, and Git commit are intended for **staging**.
 - [ ] Confirm exact OCI instance shape, available RAM, disk, architecture, and Python strategy.
-- [ ] Verify R2 bucket exists and the two Cloudflare queues can be provisioned.
+- [x] Verify R2 bucket `grabpic-photos` and both Cloudflare queues exist.
 - [ ] Establish secret ownership with unique, random `CONVEX_SERVICE_SECRET`, `PROCESSOR_TOKEN`, and `PROCESSOR_CALLBACK_TOKEN`.
 - [ ] Never create paid resources, change billing, delete existing resources, weaken firewall rules, or rotate live credentials without explicit approval.
 
 ### Phase 1: Convex
 
-- [ ] Deploy schema and functions from `apps/api/convex` to the intended environment.
-- [ ] Set `CONVEX_SERVICE_SECRET` in Convex and the Worker to the **same value**.
-- [ ] Verify deployed 512-dimensional vector index and a working system health query.
-- [ ] Record the actual `CONVEX_URL` without confusing it with the deploy key.
+- [x] Deploy schema and functions from `apps/api/convex` to production `rare-mole-267`.
+- [x] Set matching `CONVEX_SERVICE_SECRET` in Convex and the deployed Worker version; authenticated health passes.
+- [x] Verify deployed 512-dimensional event-filtered vector index and system health query.
+- [x] Record `CONVEX_URL=https://rare-mole-267.convex.cloud` in the ignored root `.env` and Worker secret binding.
 
 ### Phase 2: Cloudflare R2 and Queues
 
-- [ ] Provision/verify the private R2 bucket `grabpic-photos` and bucket-scoped S3 credentials.
-- [ ] Set R2 browser upload CORS for the exact deployed Pages origin.
-- [ ] Create dead-letter queue `grabpic-processing-dead` **before** `grabpic-processing`.
-- [ ] Verify Worker R2 binding, Queue producer/consumers, rate limiter, and scheduled cron configuration.
+- [x] Verify private R2 bucket `grabpic-photos`; replacement credentials passed a write/read/delete round trip in this session.
+- [x] Configure R2 PUT CORS for planned `https://grabpic.pages.dev` and local development origins; browser upload from a deployed frontend remains untested.
+- [x] Create `grabpic-processing-dead` and `grabpic-processing`; both consumers exist and delivery is paused.
+- [x] Verify Worker R2 binding, Queue producer, and rate limiter on the deployed version.
+- [ ] Enable and verify queue delivery and the expiry cron after OCI setup and release gates; neither is active now.
 
 ### Phase 3: OCI processor
 
@@ -250,13 +251,14 @@ Follow `docs/deployment.md` for actual commands and service-specific setup. Use 
 
 ### Phase 4: Cloudflare Worker
 
-- [ ] Configure `CONVEX_URL`, `CONVEX_SERVICE_SECRET`, R2 credentials, and the three HTTPS processor URLs and tokens.
-- [ ] Deploy Hono Worker; verify `/health` returns `ok` and `/health/processing` reports `database: connected`.
-- [ ] Verify Queue consumer, dead-letter consumer, R2 binding, rate limiting, and cron are active.
+- [x] Configure Convex/R2 secret bindings and both processor tokens on version `a4c0d732-b7cd-4d00-b04e-63534cb8a2ae`.
+- [ ] Configure the three HTTPS processor URLs after the user completes OCI setup.
+- [x] Deploy Hono Worker for preview access; verify HTTP 200 from `/health` and `/health/processing` with `database: connected` (section 9).
+- [ ] Complete production routing, queue delivery, and cron activation after the remaining gates. The primary `workers.dev` route is disabled.
 
 ### Phase 5: Cloudflare Pages
 
-- [ ] Build static Next.js export from repository root into `apps/web/out`.
+- [x] Build static Next.js export locally into `apps/web/out`; Pages Functions compilation also passed in this session.
 - [ ] Set build-time `NEXT_PUBLIC_API_URL` to the **actual** deployed Worker address.
 - [ ] Deploy Pages Functions for invite redirects.
 - [ ] Configure Pages origin in **both** R2 CORS and Worker `CORS_ORIGINS` as necessary.
@@ -280,20 +282,46 @@ Use disposable, consented photo fixtures. At minimum:
 
 ## 9. Current known status (as of 2026-10-16)
 
-### Confirmed from repository
+### Verified deployment evidence
 
-- Phase 1 application implementation and deployment/readiness fixes are merged.
-- CI passed on `master` commit `2345e7f` on **2026-10-14**; it covers deterministic builds/contracts, Worker dry run, Pages Functions compilation, and processor tests **without actual model inference**.
-- `docs/progress.md` still marks production Convex configuration, R2, Worker/Queues, OCI processor deployment, Pages deployment, and deployed E2E testing as **unverified**.
-- No evidence in the reviewed repository establishes real photo matching quality or <5s p95 on OCI.
+Snapshot checked on **2026-10-16 IST / 2026-10-15 UTC** against source commit
+`5895969a7b27e9622a4fe433095afaaee5add0e6`. Documentation edits after this
+snapshot do not represent a new application deployment.
 
-### Confirmed from interactive user conversation
+| Component | Verified state |
+| --- | --- |
+| Convex | User selected production `https://rare-mole-267.convex.cloud`; schema/functions and event-filtered 512-dimensional `faces.by_embedding` index deployed. Direct authenticated `system.health` returns `{"status":"ok"}`. |
+| Worker | `grabpic-api`, version `a4c0d732-b7cd-4d00-b04e-63534cb8a2ae`, deployment `16cb67da-9009-421e-99e0-449b04e1f1da`. Preview routing enabled; primary `workers.dev` route disabled; no custom Worker domains attached. |
+| HTTP health | `https://staging-grabpic-api.manavkauahal99.workers.dev/health` returns HTTP 200 `{"status":"ok"}`. `/health/processing` returns HTTP 200 `{"status":"ok","database":"connected"}`. Rechecked at `2026-10-15T21:12Z`. |
+| R2 | Private `grabpic-photos` bucket bound as `PHOTOS`. Replacement credentials passed write/read/delete and cleanup verification in this session. CORS allows PUT from `https://grabpic.pages.dev`, `http://localhost:3000`, and `http://127.0.0.1:3000`, with Content-Type/Content-Length, exposed ETag, and 3600-second max age. |
+| Queues | `grabpic-processing` and `grabpic-processing-dead` exist with Worker consumers. **Both have delivery paused** and **86400-second (24-hour) retention**. Extending retention to four days failed; reconcile this with the retry-window assumption in `wrangler.toml` before go-live. |
+| Cron | No live schedules. Repository configuration contains `0 3 * * *`, but automatic expiry is **not active** on this preview deployment. |
+| Pages | Project `grabpic`, `grabpic.pages.dev`, production branch `master`; **no site deployment**. Worker CORS is configured for this planned origin. |
 
-- User has a running **Ubuntu 24.04 x86_64 OCI micro VPS** and has successfully connected to it over SSH.
-- User has been working on Cloudflare R2 and Convex credentials, but resource creation, environment binding, and deployed health checks have **not** been independently verified here.
-- User had not yet confirmed installing the GrabPic processor on the VPS.
+The health handler in `apps/api/src/index.ts` checks authenticated Convex
+connectivity only. It does not call OCI, run inference, check R2, or exercise
+Queue delivery. The R2 round trip is separate evidence. Earlier preview URLs
+returned Cloudflare 404; the successful HTTP checks above were obtained after
+initializing the Worker deployment and reapplying preview routing while keeping
+the primary route disabled.
 
-**Do not conflate:** account created, credential obtained, service configured, service deployed, health check passed, and production-ready are **distinct states**.
+### Environment and local tooling changes
+
+- Ignored root `.env` now contains the selected Convex URL/deploy key, matching service secret, R2 bucket/credentials, and both processor tokens. No secret values belong in Git or this handoff.
+- The deployed Worker has six secret bindings: `CONVEX_URL`, `CONVEX_SERVICE_SECRET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PROCESSOR_TOKEN`, and `PROCESSOR_CALLBACK_TOKEN`.
+- `.env` still has `NEXT_PUBLIC_API_URL=http://localhost:8787`. Its `WORKER_CALLBACK_URL` points to the disabled primary Worker route; replace it with the agreed reachable callback address during OCI setup. The three `PROCESSOR_*_URL` values are empty and absent from the deployed Worker.
+- Cloudflare CLI authentication uses Wrangler OAuth. The local missing `undici/lib/api` installation was repaired with `pnpm install --force --frozen-lockfile`; Wrangler secret-command startup, Worker dry-run, frontend static build, and Pages Functions compilation passed without dependency/lockfile changes.
+- An initial Convex secret mismatch was resolved using an exact UTF-8 secret file without a trailing newline. Use the file-based procedure in [convex-production-env.md](convex-production-env.md#4-deploy-convex); do not rely on the earlier PowerShell clipboard pipeline.
+
+### Explicitly unfinished
+
+OCI configuration was left to the user as requested. The earlier SSH/hardware
+report in section 7 is user-provided context, not a processor deployment check.
+Processor HTTPS endpoints, inference, memory/latency measurements, deployed
+upload-to-gallery flow, match quality, deletion/expiry, Pages deployment, and
+production activation remain open. `api.grabpic.app` is not an attached Worker
+domain and must not be presented as a working health URL. No evidence here
+establishes production readiness or the five-second target.
 
 ## 10. Engineering-agent operating rules
 
@@ -382,4 +410,12 @@ R2_SECRET_ACCESS_KEY=<scoped-r2-secret-key>
 
 ## Agent's immediate next action
 
-**Do not jump straight into deployment.** First inspect the live repository and confirm the OCI VM shape and CPU/memory budget, the actual Cloudflare/Convex resource state, and the agreed processor HTTPS hostname. Then propose the smallest safe sequence that takes GrabPic from SSH-accessible OCI VM to a **measured, consented real-stack staging smoke test**. Obtain approval for infrastructure changes and execute each phase with explicit evidence.
+**Resume from the verified preview in section 9.** Recheck its live health and
+deployment IDs before making changes. OCI configuration is explicitly owned by
+the user for now; do not install or configure the processor on their behalf.
+After they provide verified processor HTTPS endpoints, configure the Worker
+endpoints and reachable callback address, deploy Pages with the actual Worker
+URL, reconcile queue retention, and complete the measured staging gates. Queue
+delivery, cron, and production routing remain disabled until their prerequisites
+are satisfied. Do not repeat Convex/R2 provisioning or treat the health result as
+an end-to-end processing pass.
