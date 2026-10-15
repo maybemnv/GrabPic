@@ -91,6 +91,7 @@ were needed for that repair or the preview deployment.
 - [ ] Measure warm and first-request selfie-to-gallery p95 below five seconds, including a concurrent batch/selfie run
 - [ ] Verify event-isolated matches, complete deletion, and 30-day expiry against deployed services
 - [ ] Record measurements in [convex-evaluation.md](convex-evaluation.md); its existing Modal comparison is historical
+- [ ] Reconcile the 24-hour queue retention with the dead-letter retry budget before enabling queue delivery
 - [ ] Verify live alert delivery, including the Sentry reporter against a real project
 - [ ] Complete privacy policy, terms, private pilot, and rollback checks from the runbook
 

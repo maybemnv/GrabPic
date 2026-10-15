@@ -358,6 +358,27 @@ A photo whose original cannot be decoded is skipped rather than failing the
 event: the final callback lists it in `skippedPhotoIds` and Convex marks it
 `failed`. If no photo can be decoded the job fails.
 
+## Open reconciliation: queue retention vs retry budget
+
+The staged queues currently retain messages for **86,400 seconds (24 hours)**,
+not the approximately four-day window assumed by the dead-letter consumer. The
+`grabpic-processing-dead` consumer is configured with `max_retries = 100` and a
+backoff capped at one hour per attempt, which needs roughly four days to
+exhaust; extending both queues to a four-day retention failed during staging.
+
+Before enabling queue delivery, choose one option and record the decision:
+
+- raise both queues' retention back to four days (Cloudflare's default) so the
+  existing `max_retries` budget can complete, or
+- lower `grabpic-processing-dead` `max_retries`/backoff so the whole retry budget
+  fits inside 24 hours, or
+- accept the 24-hour window deliberately and document the reduced outage
+  tolerance.
+
+Until this is reconciled, delivery stays paused. A job that outlives retention
+is dropped before it reaches the dead-letter consumer, leaving the event stuck
+in `processing`.
+
 ## Local verification, without embeddings
 
 ```bash
