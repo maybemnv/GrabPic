@@ -1,14 +1,22 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   createEvent,
   getUploadUrls,
   confirmUpload,
+  uploadPhoto,
   getEventStatus,
   type CreateEventResponse,
 } from '@/lib/api'
-import { ArrowRight, Check, Copy, Upload, Share2, Loader } from 'lucide-react'
+import { Copy, Check, Upload, Share2, ExternalLink } from 'lucide-react'
+import { SiteHeader } from '@/components/SiteHeader'
+import { SiteFooter } from '@/components/SiteFooter'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/FormField'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { ErrorState } from '@/components/ui/States'
+import { FadeIn } from '@/components/ui/FadeIn'
 
 export default function OrganizerPage() {
   const [eventName, setEventName] = useState('')
@@ -17,14 +25,24 @@ export default function OrganizerPage() {
   const [event, setEvent] = useState<CreateEventResponse | null>(null)
   const [photos, setPhotos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
-  const [uploadStatus, setUploadStatus] = useState('')
+  const [uploadProgress, setUploadProgress] = useState('')
   const [processingStatus, setProcessingStatus] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current)
+    }
+  }, [])
 
   async function handleCreateEvent(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    setCreating(true)
     try {
       const data = await createEvent({
         name: eventName,
@@ -34,6 +52,8 @@ export default function OrganizerPage() {
       setEvent(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create event')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -42,7 +62,7 @@ export default function OrganizerPage() {
     setUploading(true)
     setError('')
     try {
-      setUploadStatus('Requesting upload URLs...')
+      setUploadProgress('Requesting upload URLs…')
       const { uploadUrls } = await getUploadUrls(
         event.eventId,
         event.organizerToken,
@@ -53,33 +73,37 @@ export default function OrganizerPage() {
         })),
       )
 
-      setUploadStatus('Uploading photos...')
-      await Promise.all(
-        uploadUrls.map((u, i) =>
-          fetch(u.uploadUrl, {
-            method: 'PUT',
-            body: photos[i],
-            headers: { 'Content-Type': photos[i].type },
-          }),
-        ),
+      setUploadProgress(`Uploading ${photos.length} photos…`)
+      const results = await Promise.allSettled(
+        uploadUrls.map((u, i) => uploadPhoto(u.uploadUrl, photos[i]).then(() => u.photoId)),
       )
 
-      setUploadStatus('Confirming upload...')
-      const confirm = await confirmUpload(
-        event.eventId,
-        event.organizerToken,
-        uploadUrls.map((u) => u.photoId),
-      )
-      setUploadStatus(
-        `Processing started. ${confirm.estimatedTime ? `Est. ${confirm.estimatedTime}s` : ''}`,
+      const succeeded = results
+        .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+        .map((r) => r.value)
+
+      const failed = results.filter((r) => r.status === 'rejected').length
+
+      if (failed > 0) {
+        setUploadProgress('Processing has not started.')
+        throw new Error(
+          `${failed} upload(s) failed. Retry Upload & Process to upload the full collection again.`,
+        )
+      }
+
+      setUploadProgress('Confirming upload…')
+      const confirm = await confirmUpload(event.eventId, event.organizerToken, succeeded)
+      setUploadProgress(
+        `Processing started${confirm.estimatedTime ? ` (est. ${confirm.estimatedTime}s)` : ''}.`,
       )
 
-      const interval = setInterval(async () => {
+      pollingRef.current = setInterval(async () => {
         try {
           const status = await getEventStatus(event.eventId, event.organizerToken)
           setProcessingStatus(status.status)
           if (status.status === 'ready' || status.status === 'failed') {
-            clearInterval(interval)
+            if (pollingRef.current) clearInterval(pollingRef.current)
+            pollingRef.current = null
           }
         } catch {
           /* continue polling */
@@ -92,233 +116,253 @@ export default function OrganizerPage() {
     }
   }
 
-  function copyPasscode() {
-    if (!event) return
-    navigator.clipboard.writeText(event.passcode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const copyText = useCallback((text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key)
+      setTimeout(() => setCopied(null), 2000)
+    })
+  }, [])
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    if (files.length) setPhotos(files)
   }
 
   return (
-    <main className="min-h-screen bg-black">
-      <div className="mx-auto max-w-2xl px-4 py-16 md:py-24">
-        <a
-          href="/"
-          className="inline-block text-xs sm:text-sm mb-8 transition-colors"
-          style={{ color: 'rgba(225, 224, 204, 0.6)' }}
-        >
-          &larr; Back to home
-        </a>
+    <>
+      <SiteHeader />
+      <main className="min-h-screen bg-paper paper-texture">
+        <div className="mx-auto max-w-2xl px-6 py-12 md:py-20">
+          <FadeIn>
+            <p className="text-[11px] md:text-xs font-medium uppercase tracking-[0.1em] text-muted mb-3">
+              Organizer Workspace
+            </p>
+            <h1 className="font-display text-3xl sm:text-4xl text-ink tracking-tight">
+              {event ? eventName : 'Create an event'}
+            </h1>
+            <p className="mt-2 text-sm text-muted">
+              {event
+                ? 'Manage your event, upload photos, and share with attendees.'
+                : 'Set up your event to start uploading and sharing photos.'}
+            </p>
+          </FadeIn>
 
-        <h1
-          className="text-2xl sm:text-3xl md:text-4xl font-medium mb-8"
-          style={{ color: '#E1E0CC' }}
-        >
-          Organizer Dashboard
-        </h1>
-
-        {error && (
-          <div className="mb-6 rounded-xl bg-red-900/30 border border-red-800/50 px-4 py-3">
-            <p className="text-xs sm:text-sm text-red-400">{error}</p>
-          </div>
-        )}
-
-        {!event ? (
-          <form onSubmit={handleCreateEvent} className="space-y-4">
-            <div>
-              <label
-                className="block text-xs sm:text-sm mb-1.5"
-                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
-              >
-                Event Name
-              </label>
-              <input
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-colors"
-                placeholder="e.g. Tech Conference 2026"
-                value={eventName}
-                onChange={(e) => setEventName(e.target.value)}
-                required
-                style={{ color: '#E1E0CC' }}
-              />
+          {error && (
+            <div className="mt-6">
+              <ErrorState message={error} retry={() => setError('')} />
             </div>
-            <div>
-              <label
-                className="block text-xs sm:text-sm mb-1.5"
-                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
-              >
-                Your Email
-              </label>
-              <input
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs sm:text-sm placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-colors"
-                style={{ color: '#E1E0CC' }}
-                type="email"
-                placeholder="sarah@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label
-                className="block text-xs sm:text-sm mb-1.5"
-                style={{ color: 'rgba(225, 224, 204, 0.7)' }}
-              >
-                Your Name
-              </label>
-              <input
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs sm:text-sm placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-colors"
-                style={{ color: '#E1E0CC' }}
-                placeholder="Sarah Johnson"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              className="group inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium transition-all hover:gap-3"
-              style={{ backgroundColor: '#DEDBC8', color: '#000' }}
-            >
-              Create Event
-              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-            </button>
-          </form>
-        ) : (
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-white/10 bg-[#101010] p-6">
-              <h2 className="text-lg sm:text-xl font-medium mb-3" style={{ color: '#E1E0CC' }}>
-                {eventName}
-              </h2>
+          )}
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3">
-                  <span
-                    className="text-xs sm:text-sm"
-                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
-                  >
-                    Passcode
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="font-mono text-base sm:text-lg tracking-widest font-bold"
-                      style={{ color: '#E1E0CC' }}
-                    >
-                      {event.passcode}
-                    </span>
-                    <button
-                      onClick={copyPasscode}
-                      className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                    >
-                      {copied ? (
-                        <Check className="w-4 h-4 text-green-400" />
-                      ) : (
-                        <Copy className="w-4 h-4" style={{ color: 'rgba(225, 224, 204, 0.6)' }} />
-                      )}
-                    </button>
+          {!event ? (
+            <FadeIn delay={0.1}>
+              <form onSubmit={handleCreateEvent} className="mt-8 space-y-5">
+                <Input
+                  label="Event Name"
+                  placeholder="e.g. Tech Conference 2026"
+                  value={eventName}
+                  onChange={(e) => setEventName(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Your Email"
+                  type="email"
+                  placeholder="sarah@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Your Name"
+                  placeholder="Sarah Johnson"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+                <Button type="submit" showArrow loading={creating}>
+                  Create Event
+                </Button>
+              </form>
+            </FadeIn>
+          ) : (
+            <div className="mt-8 space-y-6">
+              {/* Event Overview */}
+              <FadeIn>
+                <div className="rounded-card border border-border bg-ivory p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-ink">{eventName}</h2>
+                    {processingStatus && (
+                      <StatusBadge
+                        status={
+                          processingStatus === 'ready'
+                            ? 'ready'
+                            : processingStatus === 'failed'
+                              ? 'failed'
+                              : 'processing'
+                        }
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <InfoRow
+                      label="Passcode"
+                      value={
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-lg tracking-widest font-semibold text-ink">
+                            {event.passcode}
+                          </span>
+                          <CopyBtn
+                            onClick={() => copyText(event.passcode, 'passcode')}
+                            copied={copied === 'passcode'}
+                          />
+                        </div>
+                      }
+                    />
+
+                    <InfoRow
+                      label="Share Link"
+                      value={
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={event.shareUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-terracotta hover:text-terracotta-dark transition-colors inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Open link
+                          </a>
+                          <CopyBtn
+                            onClick={() => copyText(event.shareUrl, 'shareUrl')}
+                            copied={copied === 'shareUrl'}
+                          />
+                        </div>
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-4 rounded-input border border-[var(--warning)]/30 bg-[var(--warning-bg)] px-4 py-3">
+                    <p className="text-xs font-medium text-[var(--warning)] mb-1">
+                      Save your organizer token
+                    </p>
+                    <p className="text-xs text-[var(--warning)]/80 mb-2">
+                      This token is shown only once and is required for future management.
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <code className="text-[11px] text-[var(--warning)] break-all flex-1 select-all">
+                        {event.organizerToken}
+                      </code>
+                      <CopyBtn
+                        onClick={() => copyText(event.organizerToken, 'token')}
+                        copied={copied === 'token'}
+                      />
+                    </div>
                   </div>
                 </div>
+              </FadeIn>
 
-                <div className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3">
-                  <span
-                    className="text-xs sm:text-sm"
-                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
+              {/* Photo Upload */}
+              <FadeIn delay={0.08}>
+                <div className="rounded-card border border-border bg-ivory p-6">
+                  <h2 className="text-lg font-semibold text-ink mb-4">Upload Photos</h2>
+
+                  <div
+                    className="flex flex-col items-center justify-center rounded-input border-2 border-dashed border-border bg-paper px-6 py-10 cursor-pointer transition-colors hover:border-terracotta/40 hover:bg-oat/20"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click()
+                    }}
                   >
-                    Share Link
-                  </span>
-                  <a
-                    href={event.shareUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs sm:text-sm transition-colors hover:underline"
-                    style={{ color: '#DEDBC8' }}
-                  >
-                    <Share2 className="w-3.5 h-3.5" />
-                    Open
-                  </a>
-                </div>
+                    <Upload className="w-6 h-6 text-muted mb-2" />
+                    <p className="text-sm text-muted text-center">
+                      {photos.length > 0
+                        ? `${photos.length} photo${photos.length !== 1 ? 's' : ''} selected`
+                        : 'Drag and drop photos, or click to browse'}
+                    </p>
+                    <p className="text-xs text-muted/60 mt-1">JPEG, PNG, WebP</p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => setPhotos(Array.from(e.target.files || []))}
+                      className="hidden"
+                    />
+                  </div>
 
-                <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3">
-                  <p className="text-xs" style={{ color: 'rgba(225, 224, 204, 0.7)' }}>
-                    Save this organizer token. It is shown only when the event is created and
-                    protects future management requests.
-                  </p>
-                  <code className="mt-2 block break-all text-[11px]" style={{ color: '#DEDBC8' }}>
-                    {event.organizerToken}
-                  </code>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-[#101010] p-6">
-              <h2 className="text-sm sm:text-base font-medium mb-4" style={{ color: '#E1E0CC' }}>
-                Upload Photos
-              </h2>
-
-              <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-white/10 bg-white/5 px-6 py-8 cursor-pointer hover:border-primary/30 transition-colors">
-                <Upload className="w-6 h-6 mb-2" style={{ color: 'rgba(225, 224, 204, 0.5)' }} />
-                <span className="text-xs sm:text-sm" style={{ color: 'rgba(225, 224, 204, 0.5)' }}>
-                  {photos.length > 0
-                    ? `${photos.length} photos selected`
-                    : 'Click to select photos'}
-                </span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={(e) => setPhotos(Array.from(e.target.files || []))}
-                  className="hidden"
-                />
-              </label>
-
-              {photos.length > 0 && (
-                <button
-                  onClick={handleUpload}
-                  disabled={uploading}
-                  className="group mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium transition-all hover:gap-3 disabled:opacity-50"
-                  style={{ backgroundColor: '#DEDBC8', color: '#000' }}
-                >
-                  {uploading ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" /> {uploadStatus}
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" /> Upload & Process
-                    </>
+                  {photos.length > 0 && (
+                    <div className="mt-4 flex items-center gap-3">
+                      <Button onClick={handleUpload} loading={uploading}>
+                        <Upload className="w-4 h-4" />
+                        Upload & Process
+                      </Button>
+                      {!uploading && (
+                        <Button variant="ghost" onClick={() => setPhotos([])}>
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   )}
-                </button>
-              )}
 
-              {uploadStatus && !uploading && (
-                <p
-                  className="mt-3 text-xs sm:text-sm"
-                  style={{ color: 'rgba(225, 224, 204, 0.6)' }}
-                >
-                  {uploadStatus}
-                </p>
-              )}
+                  {uploadProgress && <p className="mt-3 text-sm text-muted">{uploadProgress}</p>}
 
-              {processingStatus && (
-                <div className="mt-3 flex items-center gap-2">
-                  <span
-                    className={`inline-block w-2 h-2 rounded-full ${processingStatus === 'ready' ? 'bg-green-400' : processingStatus === 'failed' ? 'bg-red-400' : 'bg-yellow-400 animate-pulse'}`}
-                  />
-                  <span
-                    className="text-xs sm:text-sm"
-                    style={{ color: 'rgba(225, 224, 204, 0.6)' }}
-                  >
-                    {processingStatus === 'ready'
-                      ? 'Processing complete'
-                      : processingStatus === 'failed'
-                        ? 'Processing failed'
-                        : 'Processing...'}
-                  </span>
+                  {processingStatus && (
+                    <div className="mt-3">
+                      <StatusBadge
+                        status={
+                          processingStatus === 'ready'
+                            ? 'ready'
+                            : processingStatus === 'failed'
+                              ? 'failed'
+                              : 'processing'
+                        }
+                        label={
+                          processingStatus === 'ready'
+                            ? 'Processing complete'
+                            : processingStatus === 'failed'
+                              ? 'Processing failed'
+                              : 'Processing photos…'
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+              </FadeIn>
             </div>
-          </div>
-        )}
-      </div>
-    </main>
+          )}
+        </div>
+      </main>
+      <SiteFooter />
+    </>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between rounded-input bg-paper px-4 py-3">
+      <span className="text-sm text-muted">{label}</span>
+      {value}
+    </div>
+  )
+}
+
+function CopyBtn({ onClick, copied }: { onClick: () => void; copied: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className="p-1.5 rounded-input text-muted hover:text-ink hover:bg-oat/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terracotta"
+      aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+    >
+      {copied ? (
+        <Check className="w-3.5 h-3.5 text-[var(--success)]" />
+      ) : (
+        <Copy className="w-3.5 h-3.5" />
+      )}
+    </button>
   )
 }

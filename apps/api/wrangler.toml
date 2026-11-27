@@ -21,7 +21,9 @@ dead_letter_queue = "grabpic-processing-dead"
 queue = "grabpic-processing-dead"
 max_batch_size = 10
 # Messages are dropped after max_retries and this queue has no DLQ of its own, so
-# allow the maximum with backoff (about four days, the default message retention).
+# allow bounded retries with backoff. Retention is configured on each queue,
+# not here: Free is fixed at 24h; Paid defaults to 4 days. Expiry can occur
+# before retry exhaustion and does not guarantee dead-letter delivery.
 max_retries = 100
 
 [[ratelimits]]
@@ -38,7 +40,7 @@ MATCH_THRESHOLD = "0.6"
 R2_BUCKET = "grabpic-photos"
 
 [triggers]
-crons = ["0 3 * * *"]
+crons = ["0 * * * *"]
 
 [env.dev]
 vars = { LOG_LEVEL = "debug" }

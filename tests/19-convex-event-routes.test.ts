@@ -114,6 +114,67 @@ describe('Convex event routes', () => {
     })
   })
 
+  it('rejects retention beyond 30 days before creating an event', async () => {
+    const response = await app.fetch(
+      new Request('https://api.test/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Event',
+          organizerEmail: 'a@example.test',
+          organizerName: 'A',
+          expiryDays: 31,
+        }),
+      }),
+      testEnv(),
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    )
+    expect(response.status).toBe(400)
+    expect(client.mutation).not.toHaveBeenCalled()
+  })
+
+  it('uses configured web origin and current API origin for event links', async () => {
+    client.mutation.mockResolvedValue({})
+    const response = await app.fetch(
+      new Request('https://staging-api.test/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Event',
+          organizerEmail: 'a@example.test',
+          organizerName: 'A',
+        }),
+      }),
+      { ...testEnv(), WEB_BASE_URL: 'https://staging-web.test/' },
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    )
+    expect(response.status).toBe(201)
+    const body = await response.json<Record<string, string>>()
+    expect(body.shareUrl).toMatch(/^https:\/\/staging-web.test\/e\/[a-f0-9]{32}$/)
+    expect(body.qrCode).toBe(`https://staging-api.test/qr/${body.eventId}`)
+  })
+
+  it('encodes the configured frontend invite in organizer-only uncached QR responses', async () => {
+    client.query.mockResolvedValue({ inviteToken: '0123456789abcdef0123456789abcdef' })
+    const response = await app.fetch(
+      new Request('https://api.test/qr/evt_test', {
+        headers: { Authorization: 'Bearer organizer-token' },
+      }),
+      { ...testEnv(), WEB_BASE_URL: 'https://staging-web.test' },
+      { waitUntil: vi.fn() } as unknown as ExecutionContext,
+    )
+    expect(response.status).toBe(200)
+    const qrcode = await import('../apps/api/node_modules/qrcode/lib/index.js')
+    expect(await response.text()).toBe(
+      await qrcode.toString('https://staging-web.test/e/0123456789abcdef0123456789abcdef', {
+        type: 'svg',
+        width: 400,
+        margin: 2,
+      }),
+    )
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+  })
+
   it('uses Convex for attendee lookup and preserves the response contract', async () => {
     client.query.mockResolvedValue({
       eventId: 'evt_1234abcd',

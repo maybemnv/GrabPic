@@ -88,6 +88,8 @@ export const confirm = mutation({
           status: 'pending',
           attempts: attempt,
           modalJobId: undefined,
+          deliveredAt: undefined,
+          acceptedAt: undefined,
           sanitizedError: undefined,
           updatedAt: args.now,
         })

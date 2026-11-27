@@ -8,8 +8,8 @@ import { qr } from './routes/qr'
 import { processorCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
-import { cleanupExpiredEvents } from './lib/event-cleanup'
-import { createConvexClient, hasConvexError } from './lib/convex'
+import { cleanupExpiredEvents, cleanupOrphanedPhotos } from './lib/event-cleanup'
+import { createConvexClient } from './lib/convex'
 import { requestProcessingAcceptance, requestProcessingCancellation } from './lib/processor'
 import type { ProcessingRequest } from './lib/processor'
 
@@ -33,6 +33,7 @@ export interface Env {
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
+  WEB_BASE_URL?: string
   CORS_ORIGINS?: string
 }
 
@@ -127,6 +128,30 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
     (async () => {
       try {
         const client = createConvexClient(env)
+        try {
+          const now = Math.floor(Date.now() / 1000)
+          const jobs = await client.mutation(api.processing.listUndelivered, {
+            serviceSecret: env.CONVEX_SERVICE_SECRET,
+            now,
+          })
+          for (const job of jobs) {
+            try {
+              await env.PROCESSING_QUEUE.send(job)
+              await client.mutation(api.processing.markAccepted, {
+                serviceSecret: env.CONVEX_SERVICE_SECRET,
+                eventPublicId: job.event_id,
+                jobPublicId: job.job_id,
+                attempt: job.attempt,
+                modalJobId: job.job_id,
+                now,
+              })
+            } catch {
+              sentry.captureMessage('Processing dispatch replay failed', { job_id: job.job_id })
+            }
+          }
+        } catch {
+          sentry.captureMessage('Processing dispatch reconciliation failed')
+        }
         await cleanupExpiredEvents({
           client,
           serviceSecret: env.CONVEX_SERVICE_SECRET,
@@ -150,49 +175,30 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
           scheduledTime: controller.scheduledTime,
         })
       }
+      try {
+        await cleanupOrphanedPhotos({
+          client: createConvexClient(env),
+          serviceSecret: env.CONVEX_SERVICE_SECRET,
+          bucket: env.PHOTOS,
+        })
+      } catch {
+        sentry.captureMessage('Orphan photo reconciliation failed')
+      }
     })(),
   )
 }
 
 const DEAD_LETTER_QUEUE = 'grabpic-processing-dead'
 
-// A job that exhausted its delivery retries would otherwise sit in "processing"
-// forever. Marking it failed surfaces it to the organizer, who can retry through
-// the normal upload confirmation path.
-const failAbandonedJobs = async (
-  batch: MessageBatch<ProcessingDispatch>,
-  env: Env,
-  convex: ReturnType<typeof createConvexClient>,
-  ctx: ExecutionContext,
-) => {
-  const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
-  for (const message of batch.messages) {
-    const { event_id, job_id, attempt } = message.body
-    try {
-      await convex.mutation(api.processing.markProcessingFailed, {
-        serviceSecret: env.CONVEX_SERVICE_SECRET,
-        eventPublicId: event_id,
-        jobPublicId: job_id,
-        attempt,
-        sanitizedError: 'Processing could not be dispatched',
-        now: Math.floor(Date.now() / 1000),
-      })
-      sentry.captureMessage('Processing job abandoned after queue retries', { event_id, job_id })
-      message.ack()
-    } catch (error) {
-      const settled = ['EVENT_NOT_FOUND', 'EVENT_DELETING', 'JOB_NOT_FOUND', 'STALE_JOB'].some(
-        (code) => hasConvexError(error, code),
-      )
-      if (settled) message.ack()
-      // Back off up to an hour so a long Convex outage does not exhaust the retries.
-      else message.retry({ delaySeconds: Math.min(60 * (message.attempts ?? 1), 3600) })
-    }
-  }
-}
-
 const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch, env, ctx) => {
   const convex = createConvexClient(env)
-  if (batch.queue === DEAD_LETTER_QUEUE) return failAbandonedJobs(batch, env, convex, ctx)
+  if (batch.queue === DEAD_LETTER_QUEUE) {
+    // A timed-out HTTP request may already be durable at the processor; replay is safe, failure is not.
+    const sentry = createSentryReporter(env.SENTRY_DSN, (promise) => ctx.waitUntil(promise))
+    sentry.captureMessage('Processing delivery exhausted; durable reconciliation will replay')
+    for (const message of batch.messages) message.ack()
+    return
+  }
   for (const message of batch.messages) {
     const request = message.body
     try {
@@ -216,6 +222,13 @@ const queue: ExportedHandlerQueueHandler<Env, ProcessingDispatch> = async (batch
         { ...request, photos: state.photos },
       )
       if (acceptedId !== request.job_id) throw new Error('Processor returned a different job ID')
+      await convex.mutation(api.processing.markDelivered, {
+        serviceSecret: env.CONVEX_SERVICE_SECRET,
+        eventPublicId: request.event_id,
+        jobPublicId: request.job_id,
+        attempt: request.attempt,
+        now: Math.floor(Date.now() / 1000),
+      })
       message.ack()
     } catch {
       message.retry({ delaySeconds: 30 })

@@ -4,12 +4,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREA
 WORKDIR /opt/grabpic
 
 COPY requirements.txt .
-# Build elsewhere and pull the image on OCI; the 1 GB VM should not compile packages.
+# Install CPU wheels at build time rather than during service startup.
 RUN pip install --no-cache-dir torch==2.2.2 torchvision==0.17.2 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 COPY processor.py server.py ./
 
-# Cache the pinned FaceNet weights in the image so the VM never downloads at request time.
+# Cache the pinned FaceNet weights so startup does not require a model download.
 RUN python -c "from facenet_pytorch import InceptionResnetV1; InceptionResnetV1(pretrained='vggface2')" \
     && chmod -R a+rX /opt/grabpic/models
 
