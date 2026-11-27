@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/Button'
 import { FadeIn } from '@/components/ui/FadeIn'
 
 const CHECKS = [
-  { label: 'API Server', key: 'api', endpoint: '/api/health' },
-  { label: 'Face Processing', key: 'processing', endpoint: '/api/health/processing' },
+  { label: 'API Server', key: 'api', endpoint: '/health' },
+  { label: 'Convex Database', key: 'processing', endpoint: '/health/processing' },
 ] as const
 
 export default function StatusPage() {
@@ -24,7 +24,10 @@ export default function StatusPage() {
       try {
         const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
         const res = await fetch(`${base}${endpoint}`)
-        setHealth((prev) => ({ ...prev, [key]: res.ok }))
+        const data = await res.json()
+        const healthy =
+          res.ok && data.status === 'ok' && (key !== 'processing' || data.database === 'connected')
+        setHealth((prev) => ({ ...prev, [key]: healthy }))
       } catch {
         setHealth((prev) => ({ ...prev, [key]: false }))
       }
@@ -73,6 +76,14 @@ export default function StatusPage() {
                 </div>
               </FadeIn>
             ))}
+            <div className="flex items-center justify-between p-4 rounded-card border border-border bg-ivory">
+              <span className="text-sm font-medium text-ink">ML Processor</span>
+              <StatusBadge status="pending" label="Unverified" />
+            </div>
+            <p className="text-sm text-muted">
+              These checks cover the API and its Convex connection. They do not verify model
+              loading, inference, queue delivery or matching readiness on the ML processor.
+            </p>
           </div>
 
           <div className="mt-6">
