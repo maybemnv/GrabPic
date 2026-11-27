@@ -28,6 +28,17 @@ jobs:
           NEXT_PUBLIC_API_URL: https://api.grabpic.test
       - run: test -f apps/web/out/index.html
       - run: pnpm vitest run
+      - name: Run browser smoke and review regressions
+        env:
+          NODE_PATH: /tmp/grabpic-browser-qa/node_modules
+        run: |
+          npm install --prefix /tmp/grabpic-browser-qa playwright@1.65.1 http-server@14.1.1
+          /tmp/grabpic-browser-qa/node_modules/.bin/playwright install --with-deps chromium
+          /tmp/grabpic-browser-qa/node_modules/.bin/http-server apps/web/out -p 3100 -e html -c-1 --silent &
+          trap 'kill $!' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail --silent http://127.0.0.1:3100/ > /dev/null
+          node scripts/browser-qa.cjs
+          node scripts/review-regressions.cjs
       - name: Validate Worker bindings without deploying
         run: pnpm --filter @grabpic/api exec wrangler deploy --dry-run --env='' --outdir /tmp/grabpic-worker-dryrun
       - name: Compile Cloudflare Pages Functions

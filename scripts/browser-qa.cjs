@@ -23,7 +23,10 @@ async function main() {
       })
       await context.route('https://api.grabpic.test/**', (route) => {
         const url = new URL(route.request().url())
-        let body = { status: 'ok' }
+        let body =
+          url.pathname === '/health/processing'
+            ? { status: 'ok', database: 'connected' }
+            : { status: 'ok' }
         if (url.pathname === '/events/lookup') body = { eventId: 'qa-event', name: 'QA Event' }
         if (url.pathname.endsWith('/match'))
           body = {
