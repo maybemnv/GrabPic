@@ -32,13 +32,16 @@ app.get('/:eventId', async (c) => {
     if (!event.inviteToken) {
       return c.json({ error: 'Event invite is unavailable', code: 'INVITE_UNAVAILABLE' }, 503)
     }
-    const url = `https://grabpic.app/e/${event.inviteToken}`
+    const url = new URL(
+      `/e/${event.inviteToken}`,
+      c.env.WEB_BASE_URL || 'https://grabpic.app',
+    ).toString()
 
     const qrcode = await import('qrcode')
     const svg = await qrcode.toString(url, { type: 'svg', width: 400, margin: 2 })
 
     c.header('Content-Type', 'image/svg+xml')
-    c.header('Cache-Control', 'public, max-age=3600')
+    c.header('Cache-Control', 'private, no-store')
     return c.body(svg)
   } catch (err) {
     if (hasConvexError(err, 'UNAUTHORIZED')) {
