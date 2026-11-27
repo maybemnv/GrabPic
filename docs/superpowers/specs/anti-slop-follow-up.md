@@ -22,7 +22,7 @@ Keep #15 in draft until #12 and #13 have both merged into master. Order: #12, #1
 
 ## PR review fixes
 
-PR #15 is stacked on #13 (`fix/durable-processing-recovery`), which is based on #12. #14 was requested as the stack tip, but GitHub returns 404 for that number; its URL or corrected number remains needed. Do not merge #15 before its prerequisites.
+PR #15 is stacked on #13 (`fix/durable-processing-recovery`), which is based on #12. The author confirmed the existing stack: #12 → #13 → #15. Do not merge #15 before its prerequisites.
 
 Partial upload failures now stop before confirmation; Retry uploads the complete selected collection with fresh signed URLs. Unconfirmed objects from abandoned attempts remain covered by the existing orphan cleanup. A new regression reproduces repeated PUT failure followed by a full successful retry. Dialog lifecycle now depends only on open state, with keyboard listeners updated separately; arrow tests count showModal/close calls. Status uses /health and /health/processing, labels the latter Convex, and reports ML readiness as unverified.
 
