@@ -1,0 +1,103 @@
+{
+  "testedAt": "2026-11-27T19:40:08.026Z",
+  "baseUrl": "http://127.0.0.1:3100",
+  "scope": "Static production export, mocked API, synthetic camera and gallery fixture. No real inference or infrastructure verification.",
+  "results": [
+    {
+      "page": "/",
+      "viewport": "desktop",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/organizer",
+      "viewport": "desktop",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/attendee",
+      "viewport": "desktop",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/status",
+      "viewport": "desktop",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/404.html",
+      "viewport": "desktop",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "viewport": "desktop",
+      "interactions": [
+        "consent gate",
+        "fake camera capture",
+        "mocked matching",
+        "gallery",
+        "dialog focus",
+        "Escape closes",
+        "focus restoration"
+      ],
+      "passed": true
+    },
+    {
+      "page": "/",
+      "viewport": "mobile",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/organizer",
+      "viewport": "mobile",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/attendee",
+      "viewport": "mobile",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/status",
+      "viewport": "mobile",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "page": "/404.html",
+      "viewport": "mobile",
+      "http": 200,
+      "horizontalOverflow": false,
+      "runtimeErrors": []
+    },
+    {
+      "viewport": "mobile",
+      "interactions": [
+        "consent gate",
+        "fake camera capture",
+        "mocked matching",
+        "gallery",
+        "dialog focus",
+        "Escape closes",
+        "focus restoration"
+      ],
+      "passed": true
+    }
+  ]
+}
