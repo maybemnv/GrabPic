@@ -151,3 +151,12 @@ export function deleteEvent(eventId: string, organizerToken: string) {
     headers: organizerHeaders(organizerToken),
   })
 }
+
+export async function uploadPhoto(url: string, photo: File): Promise<void> {
+  const response = await fetch(url, {
+    method: 'PUT',
+    body: photo,
+    headers: { 'Content-Type': photo.type },
+  })
+  if (!response.ok) throw new Error(`Upload failed for ${photo.name}: ${response.status}`)
+}
