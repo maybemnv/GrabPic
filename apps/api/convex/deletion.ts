@@ -5,6 +5,57 @@ import { eventByPublicId, requireOrganizer } from './lib/events'
 import { appError } from './lib/errors'
 import { requireServiceSecret } from './lib/validation'
 
+export const getOrphanScanCursor = query({
+  args: { serviceSecret: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    const scan = await ctx.db
+      .query('cleanupScans')
+      .withIndex('by_name', (q) => q.eq('name', 'orphan-photos'))
+      .unique()
+    return scan?.cursor ?? null
+  },
+})
+
+export const advanceOrphanScan = mutation({
+  args: {
+    serviceSecret: v.string(),
+    expectedCursor: v.union(v.string(), v.null()),
+    cursor: v.union(v.string(), v.null()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    const scan = await ctx.db
+      .query('cleanupScans')
+      .withIndex('by_name', (q) => q.eq('name', 'orphan-photos'))
+      .unique()
+    if ((scan?.cursor ?? null) !== args.expectedCursor) return null
+    if (scan) await ctx.db.patch(scan._id, { cursor: args.cursor ?? undefined })
+    else
+      await ctx.db.insert('cleanupScans', {
+        name: 'orphan-photos',
+        ...(args.cursor ? { cursor: args.cursor } : {}),
+      })
+    return null
+  },
+})
+
+export const findMissingEvents = query({
+  args: { serviceSecret: v.string(), eventPublicIds: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    if (args.eventPublicIds.length > 100) appError('VALIDATION_ERROR')
+    const missing: string[] = []
+    for (const id of new Set(args.eventPublicIds)) {
+      if (!(await eventByPublicId(ctx, id))) missing.push(id)
+    }
+    return missing
+  },
+})
+
 async function markDeleting(ctx: MutationCtx, eventPublicId: string, now: number) {
   const event = await eventByPublicId(ctx, eventPublicId)
   if (!event) appError('EVENT_NOT_FOUND')

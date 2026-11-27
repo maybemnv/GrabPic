@@ -3,11 +3,44 @@ import { api } from '../../convex/_generated/api'
 
 interface ObjectStore {
   delete(keys: string | string[]): Promise<void>
-  list(options: { prefix: string; cursor?: string }): Promise<{
+  list(options: { prefix: string; cursor?: string; limit?: number }): Promise<{
     objects: Array<{ key: string }>
     truncated: boolean
     cursor?: string
   }>
+}
+
+export async function cleanupOrphanedPhotos({
+  client,
+  serviceSecret,
+  bucket,
+}: Pick<CleanupEventResourcesOptions, 'client' | 'serviceSecret' | 'bucket'>): Promise<{
+  scannedObjects: number
+  objectsDeleted: number
+}> {
+  const cursor = await client.query(api.deletion.getOrphanScanCursor, { serviceSecret })
+  // shortcut: scan one page per cron; raise the budget when a full cycle exceeds the deletion SLA.
+  const page = await bucket.list({ prefix: 'events/', limit: 100, ...(cursor ? { cursor } : {}) })
+  if (page.truncated && (!page.cursor || page.cursor === cursor)) throw new Error('R2_LIST_STALLED')
+  const eventIds = [...new Set(page.objects.map(({ key }) => key.split('/')[1]).filter(Boolean))]
+  // Events exist before signing; absent IDs cannot gain legitimate uploads after this check.
+  const missing = new Set(
+    await client.query(api.deletion.findMissingEvents, {
+      serviceSecret,
+      eventPublicIds: eventIds,
+    }),
+  )
+  const keys = page.objects
+    .filter(({ key }) => missing.has(key.split('/')[1]))
+    .map(({ key }) => key)
+  if (keys.length) await bucket.delete(keys)
+  // Persist only after deletion succeeds; wrap around to catch late PUTs behind the cursor.
+  await client.mutation(api.deletion.advanceOrphanScan, {
+    serviceSecret,
+    expectedCursor: cursor,
+    cursor: page.truncated ? page.cursor! : null,
+  })
+  return { scannedObjects: page.objects.length, objectsDeleted: keys.length }
 }
 
 interface Logger {
