@@ -37,7 +37,8 @@ export const getDispatchState = query({
   handler: async (ctx, args) => {
     requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
     const event = await eventByPublicId(ctx, args.eventPublicId)
-    if (!event || event.status === 'deleting') return { state: 'gone' as const, photos: [] }
+    if (!event || event.status === 'deleting' || event.expiresAt <= Math.floor(Date.now() / 1000))
+      return { state: 'gone' as const, photos: [] }
     const job = await ctx.db
       .query('processingJobs')
       .withIndex('by_public_id', (q) => q.eq('publicId', args.jobPublicId))
@@ -45,7 +46,12 @@ export const getDispatchState = query({
     if (!job || job.eventId !== event._id || job.attempts !== args.attempt) {
       return { state: 'gone' as const, photos: [] }
     }
-    if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'complete') {
+    if (
+      job.deliveredAt !== undefined ||
+      job.status === 'failed' ||
+      job.status === 'cancelled' ||
+      job.status === 'complete'
+    ) {
       return { state: 'gone' as const, photos: [] }
     }
     if (job.status !== 'accepted' && job.status !== 'processing') {
@@ -78,7 +84,9 @@ export const markAccepted = mutation({
     if (!Number.isInteger(args.attempt) || args.attempt < 1) appError('INVALID_ATTEMPT')
     const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
     if (job.modalJobId && job.modalJobId !== args.modalJobId) appError('STALE_JOB')
-    if (job.status === 'complete' || job.status === 'cancelled') appError('STALE_JOB')
+    if (job.status === 'complete' || job.status === 'processing' || job.deliveredAt !== undefined)
+      return { accepted: true }
+    if (!['pending', 'accepted'].includes(job.status)) appError('STALE_JOB')
     await ctx.db.patch(job._id, {
       status: 'accepted',
       modalJobId: args.modalJobId,
@@ -312,6 +320,7 @@ export const persistResults = mutation({
     })
     await ctx.db.patch(job._id, {
       status: args.final ? 'complete' : 'processing',
+      deliveredAt: job.deliveredAt ?? args.now,
       updatedAt: args.now,
       ...(args.final ? { completedAt: args.now } : {}),
     })
@@ -346,5 +355,53 @@ export const markProcessingFailed = mutation({
     })
     await ctx.db.patch(event._id, { status: 'failed' })
     return { recorded: true }
+  },
+})
+
+export const listUndelivered = mutation({
+  args: { serviceSecret: v.string(), now: v.number() },
+  returns: v.array(v.object({ event_id: v.string(), job_id: v.string(), attempt: v.number() })),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    const candidates = []
+    for (const status of ['pending', 'accepted'] as const) {
+      const jobs = await ctx.db
+        .query('processingJobs')
+        .withIndex('by_delivery_status', (q) =>
+          q
+            .eq('status', status)
+            .eq('deliveredAt', undefined)
+            .lt('updatedAt', args.now - 3600),
+        )
+        .take(50)
+      for (const job of jobs) {
+        const event = await ctx.db.get(job.eventId)
+        if (event && event.status === 'processing' && event.expiresAt > args.now) {
+          candidates.push({ event_id: event.publicId, job_id: job.publicId, attempt: job.attempts })
+        } else {
+          // Ineligible rows must not occupy the oldest bounded page forever.
+          await ctx.db.patch(job._id, { updatedAt: args.now })
+        }
+      }
+    }
+    return candidates
+  },
+})
+
+export const markDelivered = mutation({
+  args: {
+    serviceSecret: v.string(),
+    eventPublicId: v.string(),
+    jobPublicId: v.string(),
+    attempt: v.number(),
+    now: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    requireServiceSecret(args.serviceSecret, process.env.CONVEX_SERVICE_SECRET)
+    const { job } = await getJob(ctx, args.eventPublicId, args.jobPublicId, args.attempt)
+    if (!['accepted', 'processing', 'complete'].includes(job.status)) appError('STALE_JOB')
+    await ctx.db.patch(job._id, { deliveredAt: job.deliveredAt ?? args.now })
+    return null
   },
 })

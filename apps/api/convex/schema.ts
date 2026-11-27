@@ -30,6 +30,11 @@ const landmarks = v.object({
 })
 
 export default defineSchema({
+  cleanupScans: defineTable({
+    name: v.string(),
+    cursor: v.optional(v.string()),
+  }).index('by_name', ['name']),
+
   events: defineTable({
     publicId: v.string(),
     name: v.string(),
@@ -118,8 +123,10 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     acceptedAt: v.optional(v.number()),
+    deliveredAt: v.optional(v.number()),
     completedAt: v.optional(v.number()),
   })
     .index('by_public_id', ['publicId'])
-    .index('by_event_status', ['eventId', 'status']),
+    .index('by_event_status', ['eventId', 'status'])
+    .index('by_delivery_status', ['status', 'deliveredAt', 'updatedAt']),
 })
