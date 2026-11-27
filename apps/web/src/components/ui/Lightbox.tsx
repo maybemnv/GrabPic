@@ -28,14 +28,18 @@ export function Lightbox({ open, onClose, children, onPrev, onNext }: LightboxPr
     const previousFocus = document.activeElement
     const dialog = backdropRef.current
     dialog?.showModal()
-    document.addEventListener('keydown', handleKeyDown)
     document.body.style.overflow = 'hidden'
     return () => {
       dialog?.close()
-      document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = ''
       if (previousFocus instanceof HTMLElement) previousFocus.focus()
     }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [open, handleKeyDown])
 
   if (!open) return null
