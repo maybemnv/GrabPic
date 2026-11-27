@@ -19,3 +19,11 @@ Workspace TypeScript checks pass. Vitest reports 107 passing tests and 16 skippe
 ## Integration order
 
 Keep #15 in draft until #12 and #13 have both merged into master. Order: #12, #13, then #15. Both earlier branches touch the organizer page and API client; update from master and reconcile these flows before marking #15 ready. No merge or auto-merge was requested.
+
+## PR review fixes
+
+PR #15 is stacked on #13 (`fix/durable-processing-recovery`), which is based on #12. #14 was requested as the stack tip, but GitHub returns 404 for that number; its URL or corrected number remains needed. Do not merge #15 before its prerequisites.
+
+Partial upload failures now stop before confirmation; Retry uploads the complete selected collection with fresh signed URLs. Unconfirmed objects from abandoned attempts remain covered by the existing orphan cleanup. A new regression reproduces repeated PUT failure followed by a full successful retry. Dialog lifecycle now depends only on open state, with keyboard listeners updated separately; arrow tests count showModal/close calls. Status uses /health and /health/processing, labels the latter Convex, and reports ML readiness as unverified.
+
+Verification: all three regressions failed before fixes and pass afterward; desktop/mobile browser smoke passes; 124 Vitest tests and 30 Python tests pass. Infrastructure tests remain opt-in. Build, workspace type checks, Worker dry-run and Pages function compilation pass. The existing missing-ESLint build warning remains. Real inference and latency remain unverified.

@@ -1,5 +1,5 @@
 {
-  "testedAt": "2026-11-27T19:40:08.026Z",
+  "testedAt": "2026-11-27T20:35:12.607Z",
   "baseUrl": "http://127.0.0.1:3100",
   "scope": "Static production export, mocked API, synthetic camera and gallery fixture. No real inference or infrastructure verification.",
   "results": [
