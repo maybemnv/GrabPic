@@ -1,4 +1,4 @@
-"""Single-process, persistent CPU job runner for a small OCI VM."""
+"""Single-process, persistent CPU job runner."""
 
 import json
 import asyncio
@@ -25,6 +25,7 @@ _worker_lock = threading.Lock()
 # beyond that a flood would pin every threadpool thread, so shed load instead.
 _embed_slots = threading.BoundedSemaphore(4)
 _wake_event = threading.Event()
+_models_ready = threading.Event()
 
 
 @contextmanager
@@ -111,10 +112,12 @@ def kick_worker() -> None:
 
 
 def _preload_models() -> None:
+    _models_ready.clear()
     try:
         load_models()
     except Exception:
-        pass
+        return
+    _models_ready.set()
 
 
 @asynccontextmanager
@@ -129,8 +132,7 @@ async def lifespan(_: FastAPI):
         db.execute("UPDATE jobs SET status = 'accepted' WHERE status = 'running'")
         db.execute("UPDATE jobs SET status = 'cancelled' WHERE status = 'cancelling'")
     kick_worker()
-    # Load FaceNet now so the first selfie does not pay the cold start. Best effort:
-    # a failure here resurfaces on the first real request.
+    # Keep liveness available during cold start; readiness stays unavailable on failure.
     threading.Thread(target=_preload_models, name="grabpic-preload", daemon=True).start()
     yield
 
@@ -161,6 +163,14 @@ def health() -> dict[str, str]:
     with _connect() as db:
         db.execute("SELECT 1")
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> dict[str, str]:
+    if not _models_ready.is_set():
+        raise HTTPException(status_code=503, detail="models unavailable")
+    health()
+    return {"status": "ready"}
 
 
 @app.post("/process", status_code=202)

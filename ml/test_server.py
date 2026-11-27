@@ -13,6 +13,22 @@ sys.path.insert(0, "ml")
 
 
 class ProcessorServerTests(unittest.TestCase):
+    def test_readiness_requires_loaded_models_and_database(self):
+        from server import health, ready, _preload_models
+
+        with mock.patch("server._models_ready", threading.Event(), create=True):
+            self.assertEqual(health(), {"status": "ok"})
+            with self.assertRaises(HTTPException) as unavailable:
+                ready()
+            self.assertEqual(unavailable.exception.status_code, 503)
+            with mock.patch("server.load_models", side_effect=RuntimeError("private error")):
+                _preload_models()
+            with self.assertRaises(HTTPException):
+                ready()
+            with mock.patch("server.load_models"):
+                _preload_models()
+            self.assertEqual(ready(), {"status": "ready"})
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.environment = mock.patch.dict(
