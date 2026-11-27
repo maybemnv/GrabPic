@@ -84,21 +84,17 @@ export default function OrganizerPage() {
 
       const failed = results.filter((r) => r.status === 'rejected').length
 
-      if (succeeded.length === 0) {
-        setError('All uploads failed. Please try again.')
-        setUploading(false)
-        return
-      }
-
       if (failed > 0) {
-        setUploadProgress(`${succeeded.length} uploaded, ${failed} failed.`)
-      } else {
-        setUploadProgress('Confirming upload…')
+        setUploadProgress('Processing has not started.')
+        throw new Error(
+          `${failed} upload(s) failed. Retry Upload & Process to upload the full collection again.`,
+        )
       }
 
+      setUploadProgress('Confirming upload…')
       const confirm = await confirmUpload(event.eventId, event.organizerToken, succeeded)
       setUploadProgress(
-        `Processing started${confirm.estimatedTime ? ` (est. ${confirm.estimatedTime}s)` : ''}.${failed > 0 ? ` ${failed} file(s) failed to upload.` : ''}`,
+        `Processing started${confirm.estimatedTime ? ` (est. ${confirm.estimatedTime}s)` : ''}.`,
       )
 
       pollingRef.current = setInterval(async () => {
