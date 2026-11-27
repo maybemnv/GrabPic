@@ -1,3 +1,32 @@
+# Deployment: Render recovery boundary (2026-11-28)
+
+Render replaces the unavailable OCI processor. The OCI runbook below is historical
+and must not be followed as the current provisioning path. Cloudflare Pages,
+Worker/Queues, private R2 and Convex remain unchanged in architecture; their live
+activation is unverified. See [production audit](audits/2026-11-27-production-readiness.md).
+
+Before cutover, Manav must approve the Render instance and persistent-disk cost.
+Do not assume reported credits cover a resource. Deploy the prepared Docker service
+with one instance and one Uvicorn process; mount SQLite's PROCESSOR_DB_PATH on the
+persistent disk. Set existing PROCESSOR_TOKEN, PROCESSOR_CALLBACK_TOKEN,
+WORKER_CALLBACK_URL, R2_BUCKET, R2_ENDPOINT, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY
+securely. Never give the processor Convex credentials.
+
+Use /health for liveness and /ready for loaded-model readiness. A ready response
+is not proof of inference quality. Verify authenticated /process, /cancel and /embed,
+a disposable full event, callbacks, restart recovery, disk persistence, peak RSS and
+warm/cold selfie-to-gallery p95 before routing attendees. Preserve vggface2 weights.
+Set Worker processor endpoint URLs and trusted web origin consistently; verify CORS,
+Pages invites, actual queue retention/delivery and scheduled deletion. Keep queues
+paused until a working processor and cancellation path are established.
+
+Rollback: stop new submissions, retain SQLite/disk and Convex job state, restore the
+last tested processor image/endpoint, then reconcile pending jobs. OCI is unavailable
+and is not a rollback target. Never restore an older SQLite snapshot into live
+processing without reconciling cancellation tombstones and accepted jobs.
+
+## Historical OCI deployment instructions (obsolete provisioning path)
+
 # Deployment: Cloudflare Pages and OCI processor
 
 The public web app is a static Next.js export on Cloudflare Pages. Its `/e/:code`
