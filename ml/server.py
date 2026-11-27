@@ -1,6 +1,8 @@
-"""Single-process, persistent CPU job runner for a small OCI VM."""
+"""Single-process, persistent CPU job runner."""
 
 import json
+import hashlib
+import time
 import asyncio
 import os
 import sqlite3
@@ -25,6 +27,7 @@ _worker_lock = threading.Lock()
 # beyond that a flood would pin every threadpool thread, so shed load instead.
 _embed_slots = threading.BoundedSemaphore(4)
 _wake_event = threading.Event()
+_models_ready = threading.Event()
 
 
 @contextmanager
@@ -38,11 +41,60 @@ def _connect():
         "job_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, attempt INTEGER NOT NULL, "
         "payload TEXT NOT NULL, status TEXT NOT NULL)"
     )
+    columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+    for name, definition in (
+        ("updated_at", "INTEGER NOT NULL DEFAULT 0"),
+        ("payload_hash", "TEXT"),
+        ("retry_hash", "TEXT"),
+    ):
+        if name not in columns:
+            db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS jobs_cleanup ON jobs(updated_at) "
+        "WHERE status IN ('complete', 'failed', 'cancelled') AND payload != '{}'"
+    )
     try:
         with db:
             yield db
     finally:
         db.close()
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _retry_digest(payload: dict[str, Any]) -> str:
+    return _digest([payload.get("event_id"), payload.get("photos")])
+
+
+def cleanup_jobs(now: int | None = None) -> int:
+    cutoff = (int(time.time()) if now is None else now) - 86400
+    with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute(
+            "SELECT job_id, payload FROM jobs WHERE status IN ('complete', 'failed', 'cancelled') "
+            "AND updated_at <= ? AND payload != '{}' ORDER BY updated_at LIMIT 100", (cutoff,),
+        ).fetchall()
+        for job_id, serialized in rows:
+            payload = json.loads(serialized)
+            # Replay guards outlive source metadata: delayed deliveries must not resurrect jobs.
+            db.execute(
+                "UPDATE jobs SET payload = '{}', event_id = '', payload_hash = ?, retry_hash = ? "
+                "WHERE job_id = ?",
+                (_digest(payload), _retry_digest(payload), job_id),
+            )
+    return len(rows)
+
+
+async def _cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await asyncio.to_thread(cleanup_jobs)
+        except (sqlite3.Error, OSError):
+            # A transient disk failure must not permanently disable subsequent sweeps.
+            continue
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
@@ -89,10 +141,16 @@ def _drain() -> None:
             else:
                 status = "complete"
             with _connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+                if current and current[0] in ("cancelled", "cancelling"):
+                    status = "cancelled"
                 db.execute(
-                    "UPDATE jobs SET status = ? WHERE job_id = ?",
-                    ("cancelled" if _cancelled(job_id) else status, job_id),
+                    "UPDATE jobs SET status = ?, updated_at = ? WHERE job_id = ?",
+                    (status, int(time.time()), job_id),
                 )
+                if status == "cancelled":
+                    db.execute("UPDATE jobs SET payload = '{}', event_id = '' WHERE job_id = ?", (job_id,))
             if status == "accepted":
                 retry = threading.Timer(30, kick_worker)
                 retry.daemon = True
@@ -111,10 +169,12 @@ def kick_worker() -> None:
 
 
 def _preload_models() -> None:
+    _models_ready.clear()
     try:
         load_models()
     except Exception:
-        pass
+        return
+    _models_ready.set()
 
 
 @asynccontextmanager
@@ -127,12 +187,20 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("Processor configuration is incomplete")
     with _connect() as db:
         db.execute("UPDATE jobs SET status = 'accepted' WHERE status = 'running'")
-        db.execute("UPDATE jobs SET status = 'cancelled' WHERE status = 'cancelling'")
+        db.execute("UPDATE jobs SET status = 'cancelled', payload = '{}', event_id = '' WHERE status = 'cancelling'")
+    cleanup_jobs()
+    cleanup_task = asyncio.create_task(_cleanup_loop())
     kick_worker()
-    # Load FaceNet now so the first selfie does not pay the cold start. Best effort:
-    # a failure here resurfaces on the first real request.
+    # Keep liveness available during cold start; readiness stays unavailable on failure.
     threading.Thread(target=_preload_models, name="grabpic-preload", daemon=True).start()
-    yield
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -163,6 +231,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def ready() -> dict[str, str]:
+    if not _models_ready.is_set():
+        raise HTTPException(status_code=503, detail="models unavailable")
+    health()
+    return {"status": "ready"}
+
+
 @app.post("/process", status_code=202)
 async def process(request: Request) -> dict[str, str]:
     require_auth(request)
@@ -173,30 +249,29 @@ async def process(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=422, detail=str(error)) from error
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         existing = db.execute(
-            "SELECT payload, status FROM jobs WHERE job_id = ?", (job_id,)
+            "SELECT payload, status, attempt, payload_hash, retry_hash FROM jobs WHERE job_id = ?", (job_id,)
         ).fetchone()
         if existing:
-            old_payload, status = existing
+            old_payload, status, old_attempt, payload_hash, retry_hash = existing
             if status in ("cancelled", "cancelling"):
                 raise HTTPException(status_code=409, detail="cancelled job")
-            if old_payload != serialized:
-                previous = json.loads(old_payload)
-                if (
-                    status != "failed"
-                    or previous.get("event_id") != event_id
-                    or previous.get("attempt") != attempt - 1
-                    or previous.get("photos") != payload.get("photos")
-                ):
+            same_payload = old_payload == serialized if payload_hash is None else payload_hash == _digest(payload)
+            if not same_payload:
+                previous_retry = _retry_digest(json.loads(old_payload)) if retry_hash is None else retry_hash
+                if status != "failed" or old_attempt != attempt - 1 or previous_retry != _retry_digest(payload):
                     raise HTTPException(status_code=409, detail="conflicting job")
                 db.execute(
-                    "UPDATE jobs SET attempt = ?, payload = ?, status = 'accepted' WHERE job_id = ?",
-                    (attempt, serialized, job_id),
+                    "UPDATE jobs SET event_id = ?, attempt = ?, payload = ?, status = 'accepted', "
+                    "updated_at = ?, payload_hash = NULL, retry_hash = NULL WHERE job_id = ?",
+                    (event_id, attempt, serialized, int(time.time()), job_id),
                 )
         else:
             db.execute(
-                "INSERT INTO jobs VALUES (?, ?, ?, ?, 'accepted')",
-                (job_id, event_id, attempt, serialized),
+                "INSERT INTO jobs (job_id, event_id, attempt, payload, status, updated_at) "
+                "VALUES (?, ?, ?, ?, 'accepted', ?)",
+                (job_id, event_id, attempt, serialized, int(time.time())),
             )
     kick_worker()
     return {"job_id": job_id}
@@ -210,13 +285,15 @@ async def cancel(request: Request) -> dict[str, bool]:
     if not isinstance(job_id, str) or not job_id or len(job_id) > 200:
         raise HTTPException(status_code=422, detail="job_id is required")
     with _connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         db.execute(
-            "INSERT OR IGNORE INTO jobs VALUES (?, '', 0, '{}', 'cancelled')",
-            (job_id,),
+            "INSERT OR IGNORE INTO jobs (job_id, event_id, attempt, payload, status, updated_at) "
+            "VALUES (?, '', 0, '{}', 'cancelled', ?)",
+            (job_id, int(time.time())),
         )
         db.execute(
             "UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'cancelling' "
-            "ELSE 'cancelled' END WHERE job_id = ? AND status IN ('accepted', 'running')",
+            "ELSE 'cancelled' END WHERE job_id = ? AND status != 'cancelling'",
             (job_id,),
         )
     # Do not let deletion purge R2 while an in-flight photo can still write thumbnails.
@@ -226,6 +303,11 @@ async def cancel(request: Request) -> dict[str, bool]:
         await asyncio.sleep(0.1)
     else:
         raise HTTPException(status_code=503, detail="processor is still stopping")
+    with _connect() as db:
+        db.execute(
+            "UPDATE jobs SET payload = '{}', event_id = '', updated_at = ? WHERE job_id = ?",
+            (int(time.time()), job_id),
+        )
     # Unknown jobs may still be in the Cloudflare Queue. The tombstone rejects them.
     return {"cancelled": True}
 

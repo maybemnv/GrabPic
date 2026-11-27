@@ -5,6 +5,7 @@ import {
   createEvent,
   getUploadUrls,
   confirmUpload,
+  uploadPhoto,
   getEventStatus,
   type CreateEventResponse,
 } from '@/lib/api'
@@ -74,16 +75,7 @@ export default function OrganizerPage() {
 
       setUploadProgress(`Uploading ${photos.length} photos…`)
       const results = await Promise.allSettled(
-        uploadUrls.map((u, i) =>
-          fetch(u.uploadUrl, {
-            method: 'PUT',
-            body: photos[i],
-            headers: { 'Content-Type': photos[i].type },
-          }).then((res) => {
-            if (!res.ok) throw new Error(`Upload failed for ${photos[i].name}: ${res.status}`)
-            return u.photoId
-          }),
-        ),
+        uploadUrls.map((u, i) => uploadPhoto(u.uploadUrl, photos[i]).then(() => u.photoId)),
       )
 
       const succeeded = results

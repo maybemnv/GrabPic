@@ -1,0 +1,35 @@
+# Review the paid instance and disk cost before creating this staging service.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: grabpic-processor-staging
+    runtime: docker
+    rootDir: ml
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    numInstances: 1
+    autoDeployTrigger: 'off'
+    healthCheckPath: /ready
+    disk:
+      name: processor-jobs
+      mountPath: /var/lib/grabpic
+      sizeGB: 1
+    envVars:
+      - key: PROCESSOR_DB_PATH
+        value: /var/lib/grabpic/jobs.sqlite3
+      - key: PORT
+        value: '8000'
+      - key: PROCESSOR_TOKEN
+        sync: false
+      - key: PROCESSOR_CALLBACK_TOKEN
+        sync: false
+      - key: WORKER_CALLBACK_URL
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
