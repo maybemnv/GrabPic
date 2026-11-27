@@ -33,6 +33,7 @@ export interface Env {
   MATCH_THRESHOLD: string
   CONVEX_URL: string
   CONVEX_SERVICE_SECRET: string
+  WEB_BASE_URL?: string
   CORS_ORIGINS?: string
 }
 

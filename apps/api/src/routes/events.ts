@@ -20,7 +20,7 @@ const createEventSchema = z.object({
   name: z.string().min(1).max(200),
   organizerEmail: z.string().email(),
   organizerName: z.string().min(1).max(100),
-  expiryDays: z.number().int().min(1).max(90).default(30),
+  expiryDays: z.number().int().min(1).max(30).default(30),
 })
 
 const lookupEventSchema = z.object({ passcode: z.string().regex(/^\d{6}$/) })
@@ -89,8 +89,11 @@ app.post('/', async (c) => {
         passcode,
         organizerToken,
         uploadUrl: `/events/${eventId}/upload`,
-        shareUrl: `https://grabpic.app/e/${inviteToken}`,
-        qrCode: `https://api.grabpic.app/qr/${eventId}`,
+        shareUrl: new URL(
+          `/e/${inviteToken}`,
+          c.env.WEB_BASE_URL || 'https://grabpic.app',
+        ).toString(),
+        qrCode: new URL(`/qr/${eventId}`, c.req.url).toString(),
         expiresAt: now + expiryDays * 86400,
       },
       201,
