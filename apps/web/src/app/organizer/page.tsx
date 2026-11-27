@@ -5,6 +5,7 @@ import {
   createEvent,
   getUploadUrls,
   confirmUpload,
+  uploadPhoto,
   getEventStatus,
   type CreateEventResponse,
 } from '@/lib/api'
@@ -54,15 +55,7 @@ export default function OrganizerPage() {
       )
 
       setUploadStatus('Uploading photos...')
-      await Promise.all(
-        uploadUrls.map((u, i) =>
-          fetch(u.uploadUrl, {
-            method: 'PUT',
-            body: photos[i],
-            headers: { 'Content-Type': photos[i].type },
-          }),
-        ),
-      )
+      await Promise.all(uploadUrls.map((u, i) => uploadPhoto(u.uploadUrl, photos[i])))
 
       setUploadStatus('Confirming upload...')
       const confirm = await confirmUpload(
