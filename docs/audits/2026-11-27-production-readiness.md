@@ -100,3 +100,20 @@ with an incremented attempt; `/process` would return 409 forever. Resolve attemp
 cancellation or job identity before adding that recovery. Do not start Drive feature
 coding while this P0 remains open. GP-05 currently has a documented maintenance path
 only; automated bounded pruning is unverified. Never blindly purge tombstones.
+
+## 2026-11-28 stacked recovery update
+
+This section supersedes the implementation status above; baseline evidence remains historical.
+The recovery branch is based on hardening head `31e3044b62fe97c8d2024e201db69502d334abb1` and targets `fix/production-hardening`, not master.
+
+- GP-02: code recovery implemented and regression-tested. Convex is now the durable outbox; hourly reconciliation replays undelivered pending/accepted jobs using the same ID and attempt. `deliveredAt` records processor acceptance separately from queue enqueue. Callbacks also establish delivery. Dead letters no longer mark ambiguous accepted work failed. Replay excludes expired/deleting events and rotates filtered records to avoid starving active work. Existing permanent processor cancellation tombstones remain unchanged. Actual expired-message recovery still requires deployed verification.
+- GP-05: bounded terminal payload cleanup implemented, with legacy SQLite migration. At startup and every 60 seconds, up to 100 complete/failed/cancelled rows older 24h lose event/photo payloads; cancellation scrubs after inference stops. Digests retain exact duplicate and failed-attempt retry checks. Compact IDs/digests/tombstones remain indefinitely. This bounds payload retention, not total row count or filesystem size; monitor disk and revisit expiring request/replay contracts before deleting guards.
+- Additional P1 deletion race: cron now scans one 100-object R2 page per invocation, removes objects only for absent events, and persists a compare-and-set cursor after successful deletion. It wraps to revisit late writes. Existing active/unconfirmed uploads are preserved. A failed existence check or delete leaves the page eligible for retry. The immediate deletion response describes completed deletion work, not revocation of already issued signed PUTs. Late-object cleanup is eventual and depends on a complete scan cycle; capacity acceptance remains open. Do not claim a fixed deletion SLA from this bounded scan.
+- GP-03/06/07/08: parent hardening fixes remain locally verified; existing long-expiry production rows and actual deployed behavior remain unverified.
+- GP-01/04/09/10: Render provisioning, paid sizing/credits, deployed acceptance, activation, accuracy, memory, alerting and p95 remain owner/staging gates. No live production configuration or data was changed.
+
+Observed checks on this stack: frozen install passed via `npx --yes pnpm@10.33.0 install --frozen-lockfile`; `pnpm lint` passed; build with `NEXT_PUBLIC_API_URL=https://api.grabpic.test` passed; `pnpm vitest run` reported 124 passed/16 skipped (29 files passed, 6 skipped). Python 3.11 minimal pinned dependency environment ran 30 unit tests successfully; compileall passed. Worker dry run and Pages Functions compilation are recorded in the deployment verification update. Earlier intermediate runs included expected failing regression tests while implementation was in progress; those were not acceptance results.
+
+Independent reviews found no actionable defects in retention, queue recovery or orphan cleanup. These are code reviews, not live acceptance. Pilot remains **NO-GO** until real-stack privacy, inference and latency evidence exists.
+
+Google feature code remains gated on the real application OAuth fixture. See [setup instructions](../google-drive-permission-spike-setup.md). No Google tokens were requested or read; no OAuth client keys were found among environment variable names checked locally.
