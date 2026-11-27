@@ -25,6 +25,22 @@ last tested processor image/endpoint, then reconcile pending jobs. OCI is unavai
 and is not a rollback target. Never restore an older SQLite snapshot into live
 processing without reconciling cancellation tombstones and accepted jobs.
 
+## Deploying the stacked durable recovery change
+
+1. Review and integrate the parent hardening PR before its recovery child. Back up the processor database through the existing private operational process before upgrading; do not put it in Git.
+2. Deploy the additive Convex schema/functions first: `processingJobs.deliveredAt`, its delivery/status/time index, and the singleton `cleanupScans` table with the new service-authenticated outbox and orphan functions. Wait for indexes to be ready. Older Worker code ignores these additions.
+3. Deploy the processor with terminal payload compaction. It migrates the original SQLite schema, compacts up to 100 terminal payloads older than 24h at startup/every 60s, and preserves compact replay guards indefinitely. Confirm disk write permissions, restart recovery, and database size/free-page reuse. Never TTL-delete cancellation guards with this protocol.
+4. Deploy the Worker and verify hourly `0 * * * *` cron activation. The cron independently replays undelivered jobs, expires events, and reconciles orphan R2 objects. Existing queue retention settings need no paid increase for correctness; verify actual plan limits and delivery state anyway. Recovery depends on Convex, cron and queue eventually being available.
+5. Against disposable staging resources, simulate a lost/expired queue message with no DLQ, an accepted processor response lost before DB acknowledgement, a callback arriving before enqueue acknowledgement, duplicate delivery, retry, and deletion. Confirm one logical job/attempt and correct cancellation.
+6. Obtain a signed PUT, delete its event, then perform the late PUT. Verify a subsequent complete orphan scan removes it and preserves a live event's unconfirmed upload. The scanner handles 100 objects per hourly run, wraps its durable cursor, and retains the cursor on failure. Measure a complete bucket cycle at expected volume: do not approve privacy retention based on the page limit alone. Increase scan capacity or change cleanup scheduling if that cycle exceeds the approved deletion SLA.
+7. Verify the original 30-day event expiry promise, processor memory, actual inference and warm/cold p95. Keep the pilot blocked until the evidence is recorded.
+
+Local verification for this update: frozen install, type checks, static build, Worker dry run and Pages Functions compilation passed; Vitest 124 passed/16 infrastructure tests skipped; Python unit suite 30 passed and compileall passed. Python tests ran with `uv run --python 3.11 --with numpy==1.26.4 --with scikit-learn==1.5.2 --with fastapi==0.115.12 --with pillow==10.2.0 python -m unittest ml/test_processor.py ml/test_server.py`, without real inference dependencies.
+
+Rollback must preserve the additive Convex fields and compacted SQLite rows. Do not roll back to the old processor after payload compaction: it cannot interpret digest-only replay guards and may reject valid retries. Restore or forward-fix a compatible tested processor while retaining newer cancellation state; restoring an older snapshot can lose tombstones. An older Worker can read the additive schema but loses reconciliation, so this is a paused-submissions recovery state, not an acceptable long-term deployment.
+
+See [Google permission setup](google-drive-permission-spike-setup.md) for the next external gate. No app OAuth client or authorized fixture is configured yet; the connected assistant's Drive grant is not evidence for this app's scope.
+
 ## Historical OCI deployment instructions (obsolete provisioning path)
 
 # Deployment: Cloudflare Pages and OCI processor
