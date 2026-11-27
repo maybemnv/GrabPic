@@ -118,6 +118,91 @@ class ProcessorServerTests(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 asyncio.run(process(_Request(payload)))
 
+    def test_terminal_cleanup_preserves_replay_guards_and_failed_retry(self):
+        from server import process, cleanup_jobs, get_job, _connect
+
+        payload = {
+            "job_id": "job_cleanup", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        with mock.patch("server.kick_worker"):
+            asyncio.run(process(_Request(payload)))
+            with _connect() as db:
+                db.execute("UPDATE jobs SET status = 'failed', updated_at = 1")
+            self.assertEqual(cleanup_jobs(now=100000), 1)
+            self.assertEqual(get_job("job_cleanup")["payload"], "{}")
+            self.assertEqual(asyncio.run(process(_Request(payload))), {"job_id": "job_cleanup"})
+            with self.assertRaises(HTTPException):
+                asyncio.run(process(_Request({**payload, "photos": [{"photo_id": "other", "r2_key": "events/evt_1/other.jpg"}], "attempt": 2})))
+            asyncio.run(process(_Request({**payload, "attempt": 2})))
+            self.assertEqual(get_job("job_cleanup")["status"], "accepted")
+            self.assertEqual(cleanup_jobs(now=200000), 0)
+
+    def test_cleanup_is_bounded_and_complete_replay_stays_idempotent(self):
+        import json
+        from server import process, cleanup_jobs, get_job, _connect
+
+        payload = {
+            "job_id": "job_done", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        with mock.patch("server.kick_worker"):
+            asyncio.run(process(_Request(payload)))
+            with _connect() as db:
+                db.execute("UPDATE jobs SET status = 'complete', updated_at = 1")
+                for i in range(100):
+                    db.execute("INSERT INTO jobs (job_id, event_id, attempt, payload, status, updated_at) VALUES (?, 'evt_1', 1, ?, 'complete', 2)", (f"old_{i}", json.dumps(payload)))
+            self.assertEqual(cleanup_jobs(now=100000), 100)
+            self.assertEqual(cleanup_jobs(now=100000), 1)
+            self.assertEqual(asyncio.run(process(_Request(payload))), {"job_id": "job_done"})
+            self.assertEqual(get_job("job_done")["status"], "complete")
+            from server import cancel
+            asyncio.run(cancel(_Request({"job_id": "job_done"})))
+            with self.assertRaises(HTTPException):
+                asyncio.run(process(_Request(payload)))
+
+    def test_periodic_cleanup_retries_transient_database_errors(self):
+        import sqlite3
+        from server import _cleanup_loop
+
+        async def run_sweeps():
+            with mock.patch("server.asyncio.sleep", new=mock.AsyncMock(side_effect=[None, None, asyncio.CancelledError()])), mock.patch("server.cleanup_jobs", side_effect=[sqlite3.OperationalError("busy"), 1]) as cleanup:
+                with self.assertRaises(asyncio.CancelledError):
+                    await _cleanup_loop()
+                self.assertEqual(cleanup.call_count, 2)
+
+        asyncio.run(run_sweeps())
+
+    def test_cleanup_migrates_old_schema_and_keeps_live_jobs(self):
+        import json
+        import sqlite3
+        from server import cleanup_jobs, get_job
+
+        payload = {"event_id": "evt_1", "attempt": 1, "photos": []}
+        with sqlite3.connect(os.environ["PROCESSOR_DB_PATH"]) as db:
+            db.execute("CREATE TABLE jobs (job_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, attempt INTEGER NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL)")
+            for status in ("complete", "running", "accepted", "cancelling"):
+                db.execute("INSERT INTO jobs VALUES (?, 'evt_1', 1, ?, ?)", (status, json.dumps(payload), status))
+        self.assertEqual(cleanup_jobs(now=100000), 1)
+        self.assertEqual(get_job("complete")["payload"], "{}")
+        for status in ("running", "accepted", "cancelling"):
+            self.assertNotEqual(get_job(status)["payload"], "{}")
+
+    def test_cancel_erases_payload_without_losing_tombstone(self):
+        from server import process, cancel, get_job
+
+        payload = {
+            "job_id": "job_private", "event_id": "evt_1", "attempt": 1,
+            "photos": [{"photo_id": "photo_1", "r2_key": "events/evt_1/photo_1.jpg"}],
+        }
+        with mock.patch("server.kick_worker"):
+            asyncio.run(process(_Request(payload)))
+            asyncio.run(cancel(_Request({"job_id": "job_private"})))
+            self.assertEqual(get_job("job_private")["payload"], "{}")
+            self.assertEqual(get_job("job_private")["event_id"], "")
+            with self.assertRaises(HTTPException):
+                asyncio.run(process(_Request(payload)))
+
     def test_selfie_endpoint_works_while_a_batch_job_holds_the_worker(self):
         from server import embed, _worker_lock
 
