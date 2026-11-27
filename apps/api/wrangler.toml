@@ -40,7 +40,7 @@ MATCH_THRESHOLD = "0.6"
 R2_BUCKET = "grabpic-photos"
 
 [triggers]
-crons = ["0 3 * * *"]
+crons = ["0 * * * *"]
 
 [env.dev]
 vars = { LOG_LEVEL = "debug" }

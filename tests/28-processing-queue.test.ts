@@ -90,56 +90,91 @@ describe('processing queue consumer', () => {
     expect(retry).toHaveBeenCalledWith({ delaySeconds: 30 })
   })
 
-  it('marks a job failed once it lands in the dead-letter queue', async () => {
-    client.mutation.mockResolvedValue({ recorded: true })
+  it('keeps dead letters recoverable instead of failing ambiguous accepted jobs', async () => {
     const { ack, retry, batch, env } = setup('grabpic-processing-dead')
     await dispatch(batch, env)
-    expect(client.mutation).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ eventPublicId: 'evt_1', jobPublicId: 'job_1', attempt: 2 }),
-    )
-    expect(client.query).not.toHaveBeenCalled()
     expect(ack).toHaveBeenCalledOnce()
     expect(retry).not.toHaveBeenCalled()
+    expect(client.mutation).not.toHaveBeenCalled()
   })
 
-  it('acknowledges dead-lettered jobs that are already gone and retries real failures', async () => {
-    client.mutation.mockRejectedValueOnce(new Error('STALE_JOB'))
-    let { ack, retry, batch, env } = setup('grabpic-processing-dead')
-    await dispatch(batch, env)
-    expect(ack).toHaveBeenCalledOnce()
-
-    client.mutation.mockRejectedValueOnce(new Error('network down'))
-    ;({ ack, retry, batch, env } = setup('grabpic-processing-dead'))
-    await dispatch(batch, env)
-    expect(ack).not.toHaveBeenCalled()
-    expect(retry).toHaveBeenCalledWith({ delaySeconds: 60 })
-  })
-
-  it('backs off dead-letter retries and caps the delay at an hour', async () => {
-    client.mutation.mockRejectedValue(new Error('network down'))
-    const { retry, batch, env } = setup('grabpic-processing-dead')
-    const message = batch.messages[0] as unknown as { attempts: number }
-    message.attempts = 5
-    await dispatch(batch, env)
-    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 300 })
-    message.attempts = 90
-    await dispatch(batch, env)
-    expect(retry).toHaveBeenLastCalledWith({ delaySeconds: 3600 })
-  })
-
-  it('keeps the dead-letter Sentry report alive with waitUntil', async () => {
-    client.mutation.mockResolvedValue({ recorded: true })
+  it('does not acknowledge HTTP acceptance until delivery is durable', async () => {
+    client.query.mockResolvedValue({ state: 'accepted', photos })
+    client.mutation.mockRejectedValueOnce(new Error('database down'))
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('{}')),
+      vi.fn(async () => Response.json({ job_id: 'job_1' }, { status: 202 })),
     )
-    const { batch, env } = setup('grabpic-processing-dead')
-    const waitUntil = vi.fn()
-    await worker.queue!(batch, { ...env, SENTRY_DSN: 'https://sentry.test/ingest' }, {
-      waitUntil,
-    } as unknown as ExecutionContext)
-    expect(waitUntil).toHaveBeenCalledOnce()
-    expect(waitUntil.mock.calls[0]![0]).toBeInstanceOf(Promise)
+    const { ack, retry, batch, env } = setup()
+    await dispatch(batch, env)
+    expect(ack).not.toHaveBeenCalled()
+    expect(retry).toHaveBeenCalledWith({ delaySeconds: 30 })
+    client.mutation.mockResolvedValueOnce(null)
+    await dispatch(batch, env)
+    expect(ack).toHaveBeenCalledOnce()
   })
+
+  it('replays an expired message from persisted job state without a DLQ message', async () => {
+    client.mutation.mockResolvedValueOnce([body])
+    client.query.mockResolvedValueOnce([])
+    const { env } = setup()
+    const send = vi.fn(async () => undefined)
+    const pending: Promise<unknown>[] = []
+    await worker.scheduled!(
+      { cron: '0 * * * *' } as ScheduledController,
+      { ...env, PROCESSING_QUEUE: { send } } as unknown as Env,
+      {
+        waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+      } as unknown as ExecutionContext,
+    )
+    await Promise.all(pending)
+    expect(send).toHaveBeenCalledWith(body)
+    expect(client.mutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventPublicId: 'evt_1',
+        jobPublicId: 'job_1',
+        attempt: 2,
+        modalJobId: 'job_1',
+      }),
+    )
+  })
+
+  it('leaves a failed replay send eligible and still runs deletion cleanup', async () => {
+    client.mutation.mockResolvedValueOnce([body])
+    client.query.mockResolvedValueOnce([])
+    const { env } = setup()
+    const pending: Promise<unknown>[] = []
+    await worker.scheduled!(
+      { cron: '0 * * * *' } as ScheduledController,
+      {
+        ...env,
+        PROCESSING_QUEUE: {
+          send: vi.fn(async () => {
+            throw new Error('queue down')
+          }),
+        },
+      } as unknown as Env,
+      {
+        waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+      } as unknown as ExecutionContext,
+    )
+    await Promise.all(pending)
+    expect(client.mutation).toHaveBeenCalledTimes(1)
+    expect(client.query).toHaveBeenCalledTimes(1)
+  })
+})
+
+it('still cleans expired events when reconciliation cannot read Convex jobs', async () => {
+  client.query.mockReset()
+  client.mutation.mockReset()
+  client.mutation.mockRejectedValueOnce(new Error('read failed'))
+  client.query.mockResolvedValueOnce([])
+  const { env } = setup()
+  const pending: Promise<unknown>[] = []
+  await worker.scheduled!({ cron: '0 * * * *' } as ScheduledController, env, {
+    waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+  } as unknown as ExecutionContext)
+  await Promise.all(pending)
+  expect(client.query).toHaveBeenCalledOnce()
 })
