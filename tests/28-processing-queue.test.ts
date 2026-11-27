@@ -10,6 +10,8 @@ vi.mock('../apps/api/src/lib/convex', async (importOriginal) => ({
   createConvexClient: createConvexClientMock,
 }))
 
+import { api } from '../apps/api/convex/_generated/api'
+
 import worker, { type Env } from '../apps/api/src/index'
 
 const body = {
@@ -161,7 +163,10 @@ describe('processing queue consumer', () => {
     )
     await Promise.all(pending)
     expect(client.mutation).toHaveBeenCalledTimes(1)
-    expect(client.query).toHaveBeenCalledTimes(1)
+    expect(client.query).toHaveBeenCalledWith(
+      api.deletion.listCandidates,
+      expect.objectContaining({ serviceSecret: 'secret' }),
+    )
   })
 })
 
@@ -176,5 +181,34 @@ it('still cleans expired events when reconciliation cannot read Convex jobs', as
     waitUntil: (promise: Promise<unknown>) => pending.push(promise),
   } as unknown as ExecutionContext)
   await Promise.all(pending)
-  expect(client.query).toHaveBeenCalledOnce()
+  expect(client.query).toHaveBeenCalledWith(
+    api.deletion.listCandidates,
+    expect.objectContaining({ serviceSecret: 'secret' }),
+  )
+})
+
+it('runs orphan cleanup even when expiry cleanup fails', async () => {
+  client.query.mockReset()
+  client.mutation.mockReset()
+  client.mutation.mockResolvedValueOnce([])
+  client.query
+    .mockRejectedValueOnce(new Error('expiry read failed'))
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce([])
+  const { env } = setup()
+  const list = vi.fn(async () => ({ objects: [], truncated: false }))
+  const pending: Promise<unknown>[] = []
+  await worker.scheduled!(
+    { cron: '0 * * * *' } as ScheduledController,
+    { ...env, PHOTOS: { list } } as unknown as Env,
+    {
+      waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+    } as unknown as ExecutionContext,
+  )
+  await Promise.all(pending)
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ prefix: 'events/', limit: 100 }))
+  expect(client.mutation).toHaveBeenCalledWith(
+    api.deletion.advanceOrphanScan,
+    expect.objectContaining({ cursor: null }),
+  )
 })

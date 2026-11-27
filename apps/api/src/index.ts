@@ -8,7 +8,7 @@ import { qr } from './routes/qr'
 import { processorCallback } from './routes/processor-callback'
 import { createLogger, sanitizeRequestPath } from './lib/logger'
 import { createSentryReporter } from './lib/sentry'
-import { cleanupExpiredEvents } from './lib/event-cleanup'
+import { cleanupExpiredEvents, cleanupOrphanedPhotos } from './lib/event-cleanup'
 import { createConvexClient } from './lib/convex'
 import { requestProcessingAcceptance, requestProcessingCancellation } from './lib/processor'
 import type { ProcessingRequest } from './lib/processor'
@@ -174,6 +174,15 @@ const scheduled: ExportedHandlerScheduledHandler<Env> = async (controller, env, 
           cron: controller.cron,
           scheduledTime: controller.scheduledTime,
         })
+      }
+      try {
+        await cleanupOrphanedPhotos({
+          client: createConvexClient(env),
+          serviceSecret: env.CONVEX_SERVICE_SECRET,
+          bucket: env.PHOTOS,
+        })
+      } catch {
+        sentry.captureMessage('Orphan photo reconciliation failed')
       }
     })(),
   )
